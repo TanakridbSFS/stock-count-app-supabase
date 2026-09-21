@@ -2,88 +2,92 @@
 
 Cycle-count web app for Android handheld PDA devices. Scan a Bin, confirm or
 adjust each expected line, log any unexpected stock, save, move to the next
-bin. Data lives in two Google Sheets — no separate database.
+bin. Data lives in **Supabase (Postgres)** — this repo previously used two
+Google Sheets instead; see §6 for why and what changed.
 
-Full functional spec: see `stock_count_webapp_spec.md` (shared earlier in
-the conversation) for the reasoning behind every design decision below.
+## 1. Supabase setup
 
-## 1. Google Sheets setup
+You need one Supabase project (create it at
+[supabase.com](https://supabase.com/dashboard) if you haven't already).
 
-You have two sheets already:
+### 1.1 Schema
 
-- **Master Ref** (`MASTER_SHEET_ID`) — read-only reference data: what's
-  expected in each bin.
-- **Record File** (`RECORD_SHEET_ID`) — append-only log of every count
-  action. This is the "ไม่รู้จะออกแบบยังไง" one — the design is below.
+Run this once in the Supabase SQL Editor (dashboard → SQL Editor → paste →
+Run) to create the tables this app expects:
 
-### 1.1 Master Ref — tab `BinMaster`
+```sql
+create extension if not exists "pgcrypto";
 
-Rename the tab (bottom of the sheet) to `BinMaster`, or leave it as-is and
-set `MASTER_TAB` in your `.env` to match its actual name.
+create table if not exists master_files (
+  id uuid primary key default gen_random_uuid(),
+  filename text not null,
+  uploaded_at timestamptz not null default now(),
+  uploaded_by text not null,
+  status text not null default 'active' check (status in ('active', 'archived'))
+);
 
-**Paste the raw WMS export straight in** — copy the entire contents of a
-`PHYSICAL_INVENTORY_EXPORT_*.xlsx` file (header row and all, all 16
-columns A–P: Owner, Owner Code, SKU Code, SKU Name, Inventory Status, ERP
-Batch Number, Total quantity, Occupied Qty., Available Qty., Basic UOM,
-Warehouse area code, Location Type, Container Code, Bin-location Code,
-Manufacturing Date, Expiration Date) into this tab, starting at cell A1. No
-conversion step needed — the app reads this raw shape directly and does
-the grouping itself, every time it fetches master data (see
-`lib/binMasterConvert.js`):
+create table if not exists bin_master_raw (
+  id uuid primary key default gen_random_uuid(),
+  master_file_id uuid not null references master_files(id) on delete cascade,
+  owner text,
+  owner_code text,
+  sku_code text,
+  sku_name text,
+  inventory_status text,
+  erp_batch_number text,
+  total_quantity numeric,
+  occupied_qty numeric,
+  available_qty numeric,
+  basic_uom text,
+  warehouse_area_code text,
+  location_type text,
+  container_code text,
+  bin_location_code text,
+  manufacturing_date date,
+  expiration_date date
+);
 
-- Drops `Location Type = CONTAINER` rows (`Container Code` always
-  `PICK_CONTAINER` — a picking tote, not a real bin).
-- Groups the rest by (Container Code, SKU Code, ERP Batch Number, Basic
-  UOM) — this becomes the app's idea of "Bin", "Mat", "Batch", "UOM".
-- Sums `Total quantity` within each group, collapsing the `Inventory
-  Status` split (UR/Block/QI) into one number, per your decision.
-- Pads `Batch` back out to a 10-digit text code (e.g. `9` → `0000000009`)
-  — Google Sheets' numeric read can silently drop the leading zeros from a
-  batch number, so this is re-applied on every read *and* every write
-  (`lib/binMasterConvert.js`'s `padBatch`), including batches typed by
-  hand on "+ Add New Line".
+create index if not exists idx_bin_master_raw_file_container
+  on bin_master_raw (master_file_id, container_code);
 
-To refresh for a new cycle-count round: just select the whole tab, delete
-it, and paste in a fresh export. Then hit "Refresh Master Data Now" on the
-admin console (§5) if you don't want to wait for the 1-minute cache.
+create table if not exists count_runs (
+  id uuid primary key default gen_random_uuid(),
+  run_name text not null unique,
+  master_file_id uuid not null references master_files(id),
+  barcode_code text not null unique,
+  status text not null default 'active' check (status in ('active', 'closed')),
+  created_at timestamptz not null default now(),
+  created_by text not null
+);
 
-*(There's also `tools/convert_export_to_binmaster.py` in this repo, which
-does the same grouping as a standalone script — useful if you ever want to
-eyeball the converted result locally, but the app itself doesn't need it
-now.)*
+create table if not exists count_records (
+  id uuid primary key default gen_random_uuid(),
+  run_id uuid not null references count_runs(id),
+  ts timestamptz not null default now(),
+  counter_name text not null,
+  bin text not null,
+  mat text,
+  batch text,
+  uom text,
+  expected_qty numeric,
+  counted_qty numeric,
+  line_type text not null check (line_type in ('MATCH', 'ADJUSTED', 'NEW', 'ZERO', 'EMPTY')),
+  device_id text
+);
 
-### 1.2 Record File — tab `CountRecord`
+create index if not exists idx_count_records_run_bin
+  on count_records (run_id, bin);
 
-Rename the tab to `CountRecord` (or set `RECORD_TAB` to match). Header row,
-columns A–J (no Session ID — removed per your request):
-
+create index if not exists idx_count_records_run_bin_ts
+  on count_records (run_id, bin, ts desc);
 ```
-Timestamp | CounterName | Bin | Mat | Batch | UOM | ExpectedQty | CountedQty | LineType | DeviceID
-```
 
-Leave the rest of the sheet empty — the app only ever **appends** rows
-here; it never edits or deletes existing ones. `LineType` will be one of
-`MATCH`, `ADJUSTED`, `NEW`, `ZERO`, or `EMPTY` (bin had no expected items
-and was confirmed as "nothing found" — no Mat/Batch/UOM on that row).
-`Timestamp` is written in **Thai local time** (UTC+7, e.g.
-`2026-09-11T09:47:23+07:00`), not server UTC — see `lib/time.js`; the
-"already counted today" check (§6) uses the same Thai calendar day, so the
-two stay consistent.
+### 1.2 API credentials
 
-### 1.3 Google Cloud service account (lets the app read/write both sheets)
-
-1. Go to [console.cloud.google.com](https://console.cloud.google.com/),
-   create (or reuse) a project.
-2. Enable the **Google Sheets API** for that project (APIs & Services →
-   Enable APIs and Services → search "Google Sheets API" → Enable).
-3. APIs & Services → Credentials → Create Credentials → **Service
-   Account**. Give it any name, no extra roles needed.
-4. Open the new service account → Keys → Add Key → Create new key → JSON.
-   This downloads a `.json` file — keep it private, never commit it to git.
-5. Open the JSON file. You need two values from it: `client_email` and
-   `private_key`.
-6. In **both** Google Sheets (Master Ref and Record File), click Share and
-   add that `client_email` address as **Editor**.
+Dashboard → Settings → API. You need:
+- **Project URL** (`https://xxxxx.supabase.co`)
+- **Secret (`service_role`) key** — full read/write, server-side only.
+  **Never** expose this to the browser or commit it to git.
 
 ## 2. Local setup
 
@@ -93,13 +97,8 @@ cp .env.example .env.local
 ```
 
 Edit `.env.local`:
-- `GOOGLE_SERVICE_ACCOUNT_EMAIL` = the `client_email` from the JSON key
-- `GOOGLE_PRIVATE_KEY` = the `private_key` from the JSON key (keep the
-  `\n` sequences exactly as they appear in the JSON — don't reformat them)
-- `MASTER_SHEET_ID` / `RECORD_SHEET_ID` — already filled in with your two
-  sheet IDs, but double-check they match your sheets' URLs
-- `MASTER_TAB` / `RECORD_TAB` — only change if your tab names differ from
-  `BinMaster` / `CountRecord`
+- `SUPABASE_URL` — your project URL
+- `SUPABASE_SECRET_KEY` — your secret key from §1.2
 
 Run it:
 
@@ -115,18 +114,52 @@ PDA's scanner won't be exercised until you're testing on the real device.
 
 1. Push this project to a GitHub repo.
 2. In Vercel, "Add New Project" → import that repo.
-3. In the project's Settings → Environment Variables, add the same six
-   variables from `.env.local` (paste `GOOGLE_PRIVATE_KEY` exactly as one
-   value, quotes and all).
+3. In the project's Settings → Environment Variables, add `SUPABASE_URL`
+   and `SUPABASE_SECRET_KEY` from your `.env.local`.
 4. Deploy. Open the resulting `*.vercel.app` URL on the PDA's browser.
 5. On the PDA, add the URL to the home screen (browser menu → "Add to Home
    screen") so it opens like an app.
 
-## 4. How it works
+## 4. Run Setup (`/admin/runs`) — start here for a new cycle count
+
+Each cycle-count round is a **Run** — a named batch tying together one
+uploaded master file and one barcode for PDAs to join:
+
+1. Go to `/admin/runs`.
+2. Enter a **Run Name** (e.g. `Run001_17Oct2026`) and **Your Name**.
+3. Upload the raw WMS export — `PHYSICAL_INVENTORY_EXPORT_*.xlsx`, all 16
+   columns as exported (Owner, Owner Code, SKU Code, SKU Name, Inventory
+   Status, ERP Batch Number, Total quantity, Occupied Qty., Available
+   Qty., Basic UOM, Warehouse area code, Location Type, Container Code,
+   Bin-location Code, Manufacturing Date, Expiration Date) — no manual
+   conversion needed.
+4. Click **Create Run**. The server parses the file, stores every raw row
+   in `bin_master_raw`, and generates a QR barcode encoding a short code
+   (`RUN-XXXXXXXX`).
+5. Print or display that barcode. Each PDA scans it once, on the `/join`
+   screen (see §5), before it can scan any bins.
+
+Grouping (drop `Location Type = CONTAINER` rows — picking totes, not real
+bins — then group by Container Code + SKU Code + ERP Batch Number + Basic
+UOM, summing `Total quantity`) happens on every read, in `lib/db.js`,
+mirroring what `lib/binMasterConvert.js` used to do against the Google
+Sheet. `Batch` is always re-padded to a 10-digit text code (e.g. `9` →
+`0000000009`) so a value never loses its leading zeros, whether it came
+from the export or was typed by hand on "+ Add New Line".
+
+Existing runs and their barcodes are listed further down the same page.
+Multiple runs can exist at once (e.g. re-scanning after a discrepancy, or
+running Frozen/Chilled/Dry as separate rounds) — nothing overwrites a
+previous run's data.
+
+## 5. How it works
 
 - **Start** (`/`) — counter types their name only (no username/password
-  login, and no Session/Round ID either — removed per your request).
-  Stored on-device (`localStorage`) so it survives closing the browser.
+  login). Stored on-device (`localStorage`) so it survives closing the
+  browser.
+- **Join a Run** (`/join`) — scan the Run barcode from §4. This attaches
+  the device to that Run for every subsequent bin/count until a different
+  barcode is scanned ("Change Run" on `/scan`).
 - **Scan Bin** (`/scan`) — a text field stays focused; the PDA's built-in
   scanner types the Bin code into it and sends Enter automatically
   (keyboard-wedge mode — no extra scanner setup needed).
@@ -145,51 +178,49 @@ PDA's scanner won't be exercised until you're testing on the real device.
   shortcut closes the box immediately with 0 (since a wrong line always
   gets *some* number logged, never just deleted, and 0 is already a
   definitive answer — no need to tap "Confirm" separately). None of this is
-  sent to the sheet yet — it only updates the on-screen state, the same as
+  saved yet — it only updates the on-screen state, the same as
   "Correct" — the actual save still only happens at "Review & Finish Bin" /
   "Confirm & Save" below. If the bin has **no expected items at all** in
-  Master data, it shows a "✓ Confirm — Nothing Found" button instead —
-  logs a single `EMPTY` record for the bin (so "checked, nothing here" is
-  captured properly, instead of forcing a fake New Line just to get past
-  validation); "+ Add New Line" still works normally if stock actually
-  turns up there. Unexpected stock goes in via "+ Add New Line" — typing a
-  Mat code there auto-fills its UOM from `lib/materialUom.json` (bundled in
-  the repo, converted from your `Master_UOM.xlsx`) shown read-only with an
-  "Override" button, in case that's ever wrong; a Mat that isn't in that
-  list falls back to the manual dropdown (the 15 units in
-  `lib/uomOptions.js`) instead, same as before. See "Updating the
-  Material→UOM list" below for how to refresh it. Existing lines keep
-  BinMaster's UOM as-is, unaffected by any of this. Its Mat/Batch
-  fields also treat Enter as "move to the next field" (Mat → Batch →
-  Counted Qty, skipping the UOM dropdown since that's chosen by hand, not
-  scanned), matching how the Bin-scan field already uses Enter to jump
-  straight into a bin — the PDA's auto-Enter-after-scan is put to use
-  everywhere it can be instead of just being swallowed. Some PDA barcodes
-  encode `SKU|Batch|Qty` in one scan instead of two separate SKU-only /
-  Batch-only barcodes — scanning one of those into either Mat or Batch
-  splits it and fills both fields at once (never Qty — that's still typed
-  in by hand from the actual count), then jumps straight to Counted Qty
-  instead of stopping at Batch. A plain single-value scan (no `|`) still
-  only fills whichever field it landed in, same as before. If the bin
-  already has a CountRecord row from earlier *today*, it warns before
-  letting you recount (there's no Session ID to scope this to anymore, so
-  it's judged by date instead — see §6). On a bin's last page, "Save &
-  Next Page" becomes **"Review & Finish Bin"** instead of saving right
-  away — it shows a summary of every line about to be written (Mat, Batch,
-  Expected vs. Counted, MATCH/ADJUSTED/ZERO/NEW/EMPTY) with a "Confirm &
-  Save" button to actually submit, or "Back to Edit" to change something
-  first. Nothing on that last page is saved until confirmed there. (Earlier
-  pages of a large, paginated bin still save immediately on "Save & Next
-  Page" — the summary step is only for the final page, right before moving
-  to the next bin.)
-- Every save appends rows to `CountRecord` — nothing is ever overwritten.
+  this Run's master data, it shows a "✓ Confirm — Nothing Found" button
+  instead — logs a single `EMPTY` record for the bin (so "checked, nothing
+  here" is captured properly, instead of forcing a fake New Line just to
+  get past validation); "+ Add New Line" still works normally if stock
+  actually turns up there. Unexpected stock goes in via "+ Add New Line" —
+  typing a Mat code there auto-fills its UOM from `lib/materialUom.json`
+  (bundled in the repo, converted from your `Master_UOM.xlsx`) shown
+  read-only with an "Override" button, in case that's ever wrong; a Mat
+  that isn't in that list falls back to the manual dropdown (the 15 units
+  in `lib/uomOptions.js`) instead. See "Updating the Material→UOM list"
+  below for how to refresh it. Existing lines keep the master file's UOM
+  as-is, unaffected by any of this. Its Mat/Batch fields also treat Enter
+  as "move to the next field" (Mat → Batch → Counted Qty, skipping the UOM
+  dropdown since that's chosen by hand, not scanned), matching how the
+  Bin-scan field already uses Enter to jump straight into a bin. Some PDA
+  barcodes encode `SKU|Batch|Qty` in one scan instead of two separate
+  SKU-only / Batch-only barcodes — scanning one of those into either Mat
+  or Batch splits it and fills both fields at once (never Qty — that's
+  still typed in by hand from the actual count), then jumps straight to
+  Counted Qty instead of stopping at Batch. A plain single-value scan (no
+  `|`) still only fills whichever field it landed in, same as before. If
+  the bin already has a count record from earlier *today, in this Run*,
+  it warns before letting you recount (see §7). On a bin's last page,
+  "Save & Next Page" becomes **"Review & Finish Bin"** instead of saving
+  right away — it shows a summary of every line about to be written (Mat,
+  Batch, Expected vs. Counted, MATCH/ADJUSTED/ZERO/NEW/EMPTY) with a
+  "Confirm & Save" button to actually submit, or "Back to Edit" to change
+  something first. Nothing on that last page is saved until confirmed
+  there. (Earlier pages of a large, paginated bin still save immediately
+  on "Save & Next Page" — the summary step is only for the final page,
+  right before moving to the next bin.)
+- Every save **appends** a row to `count_records` — nothing is ever
+  overwritten.
 
-### 4.1 Updating the Material→UOM list
+### 5.1 Updating the Material→UOM list
 
 `lib/materialUom.json` is a plain `{ "matCode": "UOM", ... }` map, generated
 once from your `Master_UOM.xlsx` (`Material` + `Base Unit of Measure`
-columns) — it's a static file in the repo, not read from Google Sheets, so
-it needs no extra env var and doesn't get re-checked on every request.
+columns) — it's a static file in the repo, not read from Supabase, so it
+needs no extra env var and doesn't get re-checked on every request.
 
 Since this list only changes rarely, there's no in-app upload for it —
 just send an updated `Master_UOM.xlsx` and regenerate the JSON:
@@ -211,65 +242,59 @@ Then commit `lib/materialUom.json` and redeploy — same as any other code
 change. A Mat code missing from this file just falls back to the manual
 UOM dropdown, so it's safe if the list is a little out of date.
 
-## 5. Admin Console (`/admin`)
+## 6. Admin Console (`/admin`)
 
 A small office-use page, separate from the PDA counting flow:
 
-- **Refresh Master Data Now** — the app normally re-reads the Master Ref
-  sheet at most once a minute (to stay within Google's API quota). If you
-  just edited `BinMaster` directly in the sheet and want the change to show
-  up immediately, this button forces that re-read right away and shows the
-  row count + timestamp of the refresh.
-- **Export Count Records** — downloads the raw `CountRecord` log as a CSV,
-  either for one date or for everything ever counted (dates, not Session
-  IDs, since there's no Session ID anymore).
+- **Export Count Records** — pick a **Run**, then a date (or "All dates"),
+  and download that Run's raw `count_records` log as a CSV.
 
-No passcode gate — by your call, since this only ever *reads* fresh data or
-*triggers a re-read*, it doesn't overwrite anything itself. (Editing
-`BinMaster`'s actual contents is still done directly in the Google Sheet, or
-via the conversion script in §1.1 — the console's "Refresh" button doesn't
-change what's in the sheet, just how soon the app notices.) If this page
-ever grows a feature that writes data, revisit that call.
+No passcode gate — by your call, since this only ever *reads* data. If
+this page ever grows a feature that writes data, revisit that call.
 
-## 6. Known simplifications
+Master-file uploads and Run creation live at `/admin/runs` (§4), not here.
 
-- No Session/Round ID anymore (removed per your request) — so "already
-  counted" is judged by **date**: if a Bin already has a CountRecord row
-  from earlier today, the app warns before letting anyone recount it that
-  same day. A different day (a later cycle-count round) counts it again
-  freely, no warning. Two PDAs both counting the same bin *today* is what
-  this catches; it doesn't distinguish rounds within the same day.
+## 7. Known simplifications
+
+- "Already counted" is scoped to **(Run, Bin, today)** — if a Bin already
+  has a count record from earlier today *in the currently joined Run*, the
+  app warns before letting anyone recount it that same day. A different
+  day, or a different Run, counts it again freely, no warning. Two PDAs
+  both counting the same bin, same day, same Run is what this catches.
 - It also does not currently track partial progress within a large bin's
   pages — if interrupted partway through a big bin, re-opening it later
-  today will show the "already counted today" warning (since a row exists
-  from page 1), and resuming means overriding and paging forward, which is
-  safe since earlier pages just don't need re-saving.
-- No variance/reconciliation report is built (per your earlier answer) —
-  `CountRecord` is the raw log; analysis happens outside the app.
-- Expected quantities are read live from `BinMaster` on every scan, cached
-  for 1 minute per server instance — if you edit `BinMaster` mid-session,
-  changes show up within a minute (or immediately via the admin console's
-  "Refresh Master Data Now").
+  today (in the same Run) will show the "already counted today" warning
+  (since a row exists from page 1), and resuming means overriding and
+  paging forward, which is safe since earlier pages just don't need
+  re-saving.
+- No variance/reconciliation report is built — `count_records` is the raw
+  log; analysis happens outside the app (or via `/count-result`, §9, for
+  a simple Expected/Actual/Diff rollup).
+- Timestamps are always written and displayed in Thai local time (UTC+7,
+  `lib/time.js`) — Supabase itself stores and returns them in UTC
+  (`timestamptz`), so every read converts back to Thai time before any
+  "is this today" logic runs; keep that in mind if you ever query
+  `count_records` directly in the SQL Editor.
 
-## 7. Live 3D Warehouse Dashboard (`/dashboard`)
+## 8. Live 3D Warehouse Dashboard (`/dashboard`)
 
 A separate, read-only view for the office — walk-through-the-warehouse-style
 3D map of the **entire Frozen zone, all 9 racks** (rendered with
 [three.js](https://threejs.org/), mouse/touch to rotate/zoom/pan/drag),
-colored per bin by its most recent `CountRecord` status
-(`MATCH`/`ADJUSTED`/`ZERO`/`NEW`/`EMPTY`, or grey for `UNCOUNTED`). Polls
-`/api/dashboard/bins` every **60 seconds** so it stays current while left
-open on a screen, plus a manual **⟳ Force Refresh** button for an immediate
-update (bypasses the 1-minute Master/Record cache too). Hover a cube for its
-Bin code, status, counted qty, who counted it, and when. The camera
-auto-frames the whole layout on load, so it fits a normal laptop screen
-without any extra setup.
+colored per bin by its most recent count status for the selected **Run**
+(`MATCH`/`ADJUSTED`/`ZERO`/`NEW`/`EMPTY`, or grey for `UNCOUNTED`). A
+dropdown lets you switch which Run is shown. Polls `/api/dashboard/bins`
+every **60 seconds** so it stays current while left open on a screen, plus
+a manual **⟳ Force Refresh** button. Hover a cube for its Bin code,
+status, counted qty, who counted it, and when. The camera auto-frames the
+whole layout on load, so it fits a normal laptop screen without any extra
+setup.
 
 Bin coordinates are precomputed once into `lib/warehouseLayout.json` (a
-static file — not read from Google Sheets — generated from the real
-bin-location export, `WMS_PRD_binLocation_*.xlsx`) and joined against live
-`CountRecord` data by `pages/api/dashboard/bins.js` on every request.
-Layout logic per bin code (`<Aisle>-<Position>-<Layer>`, e.g. `FA-02-A`):
+static file, generated from the real bin-location export,
+`WMS_PRD_binLocation_*.xlsx`) and joined against live `count_records` data
+by `pages/api/dashboard/bins.js` on every request. Layout logic per bin
+code (`<Aisle>-<Position>-<Layer>`, e.g. `FA-02-A`):
 
 - **Rack** (`FA`–`FJ`, 9 racks) → a Z-axis lane, in the confirmed physical
   order **FJ FH FG FF FE FD FC FB FA** (right to left, facing into the
@@ -286,18 +311,19 @@ or a layout change), re-run the same conversion against the new file: parse
 `code`, restrict to the `FA`–`FJ` aisles, compute `depth`/`side`/`level` as
 above, and assign `rackIndex` from the `FJ FH FG FF FE FD FC FB FA` order.
 
-## 8. Count Result (`/count-result`)
+## 9. Count Result (`/count-result`)
 
 A rollup table for the office — **Mat + Batch → Expected / Actual / Diff**,
 deliberately ignoring Bin Location (a material can be expected/counted
 across many bins; this page answers "did we find it all", not "where").
-Backed by `/api/count-result?zone=F|C|D|ALL`:
+A dropdown at the top-right selects which **Run** to roll up. Backed by
+`/api/count-result?runId=...&zone=F|C|D|ALL`:
 
-- **Expected** = sum of `BinMaster` `Qty` for that Mat+Batch (optionally
-  restricted to bins in the selected zone).
-- **Actual** = sum of the **latest** `CountRecord` row per (Bin, Mat,
-  Batch) — so a recounted bin isn't double-counted — for that Mat+Batch
-  (`EMPTY` rows, which have no Mat, are excluded).
+- **Expected** = sum of that Run's master-file `Qty` for that Mat+Batch
+  (optionally restricted to bins in the selected zone).
+- **Actual** = sum of the **latest** count record per (Bin, Mat, Batch)
+  within that Run — so a recounted bin isn't double-counted — for that
+  Mat+Batch (`EMPTY` rows, which have no Mat, are excluded).
 - **Diff** = Actual − Expected.
 
 Filters sit right in the table header: a **zone dropdown** (All / F =
@@ -308,8 +334,8 @@ Short (ขาด) / Over (เกิน)). Every column header is clickable to so
 ascending/descending. Same refresh pattern as the Dashboard: auto-refreshes
 every 60 seconds, plus a manual **⟳ Force Refresh** button.
 
-## 9. Navigation
+## 10. Navigation
 
 The Start page (`/`) has two buttons below "Start Counting" linking to the
 Dashboard and Count Result pages, for office/desktop use — they're not part
-of the PDA counting flow itself.
+of the PDA counting flow itself (`/` → `/join` → `/scan` → `/count/[bin]`).
