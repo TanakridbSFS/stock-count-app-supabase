@@ -76,58 +76,18 @@ export default function RunsAdminPage() {
   }
 
   return (
-    <div className="page" style={{ maxWidth: 640 }}>
-      <div className="title">Run Setup</div>
-      <div className="banner banner-info">
-        For office use. <Link href="/admin">← Admin Console</Link> ·{" "}
-        <Link href="/scan">Go to counting app →</Link>
-      </div>
-
-      <div className="card">
-        <div style={{ fontWeight: 700, marginBottom: 8 }}>Create a New Run</div>
-        <div style={{ fontSize: 14, color: "#555", marginBottom: 10 }}>
-          Name this cycle-count round, upload its raw WMS export
-          (PHYSICAL_INVENTORY_EXPORT_*.xlsx), and a barcode will be generated
-          for PDAs to scan (on the /join screen) to enter this Run.
-        </div>
-
-        {error && <div className="banner banner-warn">{error}</div>}
-
-        <div className="field">
-          <label>Run Name</label>
-          <input
-            value={runName}
-            onChange={(e) => setRunName(e.target.value)}
-            placeholder="e.g. Run001_17Oct2026"
-          />
-        </div>
-
-        <div className="field">
-          <label>Your Name</label>
-          <input
-            value={createdBy}
-            onChange={(e) => setCreatedBy(e.target.value)}
-            placeholder="e.g. Somchai"
-          />
-        </div>
-
-        <div className="field">
-          <label>BinMaster xlsx (raw WMS export)</label>
-          <input
-            type="file"
-            accept=".xlsx"
-            onChange={(e) => setFile(e.target.files?.[0] || null)}
-          />
-        </div>
-
-        <button className="btn btn-primary" disabled={creating} onClick={handleCreate}>
-          {creating ? "Creating…" : "Create Run"}
-        </button>
+    <div className="page page-admin">
+      <div className="admin-header">
+        <div className="title">Run Setup</div>
+        <nav className="admin-nav">
+          <Link href="/admin">← Admin Console</Link>
+          <Link href="/scan">Go to counting app →</Link>
+        </nav>
       </div>
 
       {lastCreated && (
-        <div className="card">
-          <div style={{ fontWeight: 700, marginBottom: 8 }}>
+        <div className="card" style={{ marginBottom: 20 }}>
+          <div className="card-title">
             "{lastCreated.run.run_name}" created — {lastCreated.masterFileRowCount} master rows loaded
           </div>
           <div style={{ textAlign: "center" }}>
@@ -142,22 +102,84 @@ export default function RunsAdminPage() {
         </div>
       )}
 
-      <div className="card">
-        <div style={{ fontWeight: 700, marginBottom: 8 }}>Existing Runs</div>
-        <button className="btn btn-secondary btn-sm" disabled={loadingRuns} onClick={loadRuns}>
-          {loadingRuns ? "Loading…" : "Refresh list"}
-        </button>
-        <div style={{ marginTop: 10 }}>
-          {runs.map((r) => (
-            <div className="card-row" key={r.id}>
-              <span>
-                {r.run_name} — <span style={{ fontFamily: "monospace" }}>{r.barcode_code}</span>
-                {" "}({r.status})
-              </span>
-              <b>{new Date(r.created_at).toLocaleString()}</b>
+      <div className="admin-grid">
+        <div className="card">
+          <div className="card-title">Create a New Run</div>
+          <div className="card-subtext">
+            Name this cycle-count round, upload its raw WMS export
+            (PHYSICAL_INVENTORY_EXPORT_*.xlsx), and a barcode will be
+            generated for PDAs to scan (on the /join screen) to enter this
+            Run.
+          </div>
+
+          {error && <div className="banner banner-warn">{error}</div>}
+
+          <div className="field-row">
+            <div className="field">
+              <label>Run Name</label>
+              <input
+                value={runName}
+                onChange={(e) => setRunName(e.target.value)}
+                placeholder="e.g. Run001_17Oct2026"
+              />
             </div>
-          ))}
-          {runs.length === 0 && <div style={{ color: "#888" }}>No runs yet.</div>}
+
+            <div className="field">
+              <label>Your Name</label>
+              <input
+                value={createdBy}
+                onChange={(e) => setCreatedBy(e.target.value)}
+                placeholder="e.g. Somchai"
+              />
+            </div>
+          </div>
+
+          <div className="field">
+            <label>BinMaster xlsx (raw WMS export)</label>
+            <input
+              type="file"
+              accept=".xlsx"
+              onChange={(e) => setFile(e.target.files?.[0] || null)}
+            />
+          </div>
+
+          <button className="btn btn-primary" disabled={creating} onClick={handleCreate}>
+            {creating ? "Creating…" : "Create Run"}
+          </button>
+        </div>
+
+        <div className="card">
+          <div className="card-title">Existing Runs</div>
+          <button className="btn btn-secondary btn-sm" disabled={loadingRuns} onClick={loadRuns}>
+            {loadingRuns ? "Loading…" : "Refresh list"}
+          </button>
+          <table className="admin-table" style={{ marginTop: 10 }}>
+            <thead>
+              <tr>
+                <th>Run</th>
+                <th>Barcode</th>
+                <th>Status</th>
+                <th>Created</th>
+              </tr>
+            </thead>
+            <tbody>
+              {runs.map((r) => (
+                <tr key={r.id}>
+                  <td>{r.run_name}</td>
+                  <td style={{ fontFamily: "monospace" }}>{r.barcode_code}</td>
+                  <td>{r.status}</td>
+                  <td>{new Date(r.created_at).toLocaleString()}</td>
+                </tr>
+              ))}
+              {runs.length === 0 && (
+                <tr>
+                  <td colSpan={4} style={{ color: "#888" }}>
+                    No runs yet.
+                  </td>
+                </tr>
+              )}
+            </tbody>
+          </table>
         </div>
       </div>
     </div>

@@ -57,6 +57,9 @@ export default function StartPage() {
         <Link href="/count-result" className="btn btn-secondary" style={{ textAlign: "center", textDecoration: "none" }}>
           Count Result
         </Link>
+        <Link href="/admin" className="btn btn-secondary" style={{ textAlign: "center", textDecoration: "none" }}>
+          Admin Console
+        </Link>
       </div>
     </div>
   );

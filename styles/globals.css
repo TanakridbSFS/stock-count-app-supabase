@@ -112,3 +112,133 @@ button {
   background: #f4f5f7;
   padding-top: 8px;
 }
+
+/* ---- Admin / office pages: designed for a full laptop screen, not the
+   PDA's small-touch layout above. Font sizes reset smaller (desktop is
+   read at arm's length with a mouse, not held up close). ---- */
+.page-admin {
+  max-width: 1180px;
+  margin: 0 auto;
+  padding: 28px 36px 60px;
+  min-height: 100vh;
+  font-size: 15px;
+}
+.page-admin .title {
+  font-size: 28px;
+  margin: 0;
+}
+.page-admin .field label {
+  font-size: 13px;
+}
+.page-admin .field input,
+.page-admin .field select {
+  padding: 10px 12px;
+  font-size: 15px;
+}
+.page-admin input[type="file"] {
+  font-size: 14px;
+}
+.page-admin .card {
+  padding: 20px 22px;
+}
+.page-admin .btn {
+  width: auto;
+  padding: 10px 20px;
+  font-size: 15px;
+}
+.admin-header {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-bottom: 20px;
+  border-bottom: 1px solid #e2e4e9;
+  padding-bottom: 16px;
+}
+.admin-nav {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.admin-nav a {
+  padding: 7px 14px;
+  border-radius: 20px;
+  background: #fff;
+  border: 1px solid #dbe1ea;
+  color: #1e40af;
+  text-decoration: none;
+  font-size: 13px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+.admin-nav a:hover {
+  background: #eff6ff;
+  border-color: #bfdbfe;
+}
+.admin-nav a.active {
+  background: #2563eb;
+  color: #fff;
+  border-color: #2563eb;
+}
+.card-title {
+  font-weight: 700;
+  font-size: 17px;
+  margin-bottom: 6px;
+}
+.card-subtext {
+  font-size: 13.5px;
+  color: #667085;
+  margin-bottom: 16px;
+  line-height: 1.5;
+}
+.admin-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(380px, 1fr));
+  gap: 20px;
+  align-items: start;
+}
+.field-row {
+  display: flex;
+  gap: 16px;
+}
+.field-row .field {
+  flex: 1;
+  min-width: 0;
+}
+.admin-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 14px;
+}
+.admin-table th {
+  text-align: left;
+  color: #667085;
+  font-weight: 600;
+  font-size: 12.5px;
+  text-transform: uppercase;
+  letter-spacing: 0.02em;
+  padding: 8px 10px;
+  border-bottom: 1px solid #e2e4e9;
+}
+.admin-table td {
+  padding: 10px 10px;
+  border-bottom: 1px solid #f0f1f4;
+  vertical-align: middle;
+}
+.admin-table tr:last-child td {
+  border-bottom: none;
+}
+
+@media (max-width: 860px) {
+  .page-admin {
+    padding: 18px 16px 40px;
+  }
+  .admin-grid {
+    grid-template-columns: 1fr;
+  }
+  .field-row {
+    flex-direction: column;
+    gap: 0;
+  }
+}
