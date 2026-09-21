@@ -2,28 +2,30 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 
 export default function AdminConsole() {
-  const [masterStatus, setMasterStatus] = useState(null);
-  const [refreshing, setRefreshing] = useState(false);
-  const [refreshMsg, setRefreshMsg] = useState("");
+  const [runs, setRuns] = useState([]);
+  const [selectedRunId, setSelectedRunId] = useState("");
 
   const [dates, setDates] = useState([]);
   const [selectedDate, setSelectedDate] = useState("ALL");
   const [loadingDates, setLoadingDates] = useState(false);
 
-  async function loadMasterStatus() {
+  async function loadRuns() {
     try {
-      const res = await fetch("/api/admin/master-status");
+      const res = await fetch("/api/admin/runs");
       const json = await res.json();
-      setMasterStatus(json);
+      const list = json.runs || [];
+      setRuns(list);
+      if (list.length > 0) setSelectedRunId((prev) => prev || list[0].id);
     } catch {
-      // non-fatal — just shows blank status
+      // non-fatal
     }
   }
 
-  async function loadDates(forceRefresh) {
+  async function loadDates(runId) {
+    if (!runId) return;
     setLoadingDates(true);
     try {
-      const res = await fetch(`/api/admin/dates${forceRefresh ? "?forceRefresh=1" : ""}`);
+      const res = await fetch(`/api/admin/dates?runId=${encodeURIComponent(runId)}`);
       const json = await res.json();
       setDates(json.dates || []);
     } catch {
@@ -34,28 +36,16 @@ export default function AdminConsole() {
   }
 
   useEffect(() => {
-    loadMasterStatus();
-    loadDates(false);
+    loadRuns();
   }, []);
 
-  async function handleRefreshMaster() {
-    setRefreshing(true);
-    setRefreshMsg("");
-    try {
-      const res = await fetch("/api/admin/refresh-master", { method: "POST" });
-      const json = await res.json();
-      if (!res.ok) throw new Error(json.error || "Failed to refresh");
-      setMasterStatus({ rowCount: json.rowCount, refreshedAt: json.refreshedAt });
-      setRefreshMsg(`Refreshed — ${json.rowCount} rows loaded from BinMaster.`);
-    } catch (e) {
-      setRefreshMsg(`Error: ${e.message}`);
-    } finally {
-      setRefreshing(false);
-    }
-  }
+  useEffect(() => {
+    setSelectedDate("ALL");
+    loadDates(selectedRunId);
+  }, [selectedRunId]);
 
   function handleExport() {
-    const params = new URLSearchParams({ date: selectedDate });
+    const params = new URLSearchParams({ runId: selectedRunId, date: selectedDate });
     window.location.href = `/api/admin/export?${params}`;
   }
 
@@ -66,37 +56,27 @@ export default function AdminConsole() {
         For office use — not needed on the PDA. <Link href="/scan">Go to counting app →</Link>
         {" · "}
         <Link href="/dashboard">Live 3D Warehouse Dashboard →</Link>
-      </div>
-
-      <div className="card">
-        <div style={{ fontWeight: 700, marginBottom: 8 }}>Master Data (BinMaster)</div>
-        <div style={{ fontSize: 14, color: "#555", marginBottom: 10 }}>
-          Edits to the Master Ref Google Sheet apply automatically within about
-          a minute (the app caches it briefly to avoid hitting Google's API
-          quota). Use this if you just edited it and want the app to pick it
-          up immediately instead of waiting.
-        </div>
-        <div className="card-row">
-          <span>Rows currently loaded</span>
-          <b>{masterStatus?.rowCount ?? "—"}</b>
-        </div>
-        <div className="card-row">
-          <span>Last refreshed</span>
-          <b>{masterStatus?.refreshedAt ? new Date(masterStatus.refreshedAt).toLocaleString() : "—"}</b>
-        </div>
-        <button className="btn btn-primary" style={{ marginTop: 10 }} disabled={refreshing} onClick={handleRefreshMaster}>
-          {refreshing ? "Refreshing…" : "Refresh Master Data Now"}
-        </button>
-        {refreshMsg && <div style={{ fontSize: 13, marginTop: 6 }}>{refreshMsg}</div>}
+        {" · "}
+        <Link href="/admin/runs">Run Setup →</Link>
       </div>
 
       <div className="card">
         <div style={{ fontWeight: 700, marginBottom: 8 }}>Export Count Records</div>
         <div style={{ fontSize: 14, color: "#555", marginBottom: 10 }}>
-          Downloads the raw CountRecord log as a CSV file — every MATCH /
-          ADJUSTED / NEW / ZERO line ever saved, for the date you pick (or
-          everything). There's no Session ID anymore, so this filters by the
-          date each row was saved instead.
+          Downloads the raw CountRecord log as a CSV file for the selected
+          Run — every MATCH / ADJUSTED / NEW / ZERO / EMPTY line saved so
+          far, for the date you pick (or everything).
+        </div>
+
+        <div className="field">
+          <label>Run</label>
+          <select value={selectedRunId} onChange={(e) => setSelectedRunId(e.target.value)}>
+            {runs.map((r) => (
+              <option key={r.id} value={r.id}>
+                {r.run_name} ({r.status})
+              </option>
+            ))}
+          </select>
         </div>
 
         <div className="field">
@@ -111,10 +91,10 @@ export default function AdminConsole() {
           </select>
         </div>
 
-        <button className="btn btn-secondary btn-sm" disabled={loadingDates} onClick={() => loadDates(true)}>
+        <button className="btn btn-secondary btn-sm" disabled={loadingDates} onClick={() => loadDates(selectedRunId)}>
           {loadingDates ? "Loading…" : "Refresh date list"}
         </button>
-        <button className="btn btn-primary" style={{ marginTop: 10 }} onClick={handleExport}>
+        <button className="btn btn-primary" style={{ marginTop: 10 }} disabled={!selectedRunId} onClick={handleExport}>
           Download CSV
         </button>
       </div>

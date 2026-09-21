@@ -1,19 +1,23 @@
-import { getAllRecordRows } from "../../../lib/googleSheets";
+import { getAllRecordRows } from "../../../lib/db";
 import warehouseLayout from "../../../lib/warehouseLayout.json";
 
-// GET /api/dashboard/bins
+// GET /api/dashboard/bins?runId=...
 // Joins the static Frozen-zone bin layout (lib/warehouseLayout.json,
 // generated once from the WMS bin-location export — position in 3D
 // space, all 9 racks FA-FJ) with each bin's most recent CountRecord row
-// (live count status), for the 3D warehouse dashboard.
+// for the selected Run (live count status), for the 3D warehouse dashboard.
 export default async function handler(req, res) {
   if (req.method !== "GET") {
     return res.status(405).json({ error: "Method not allowed" });
   }
 
+  const { runId } = req.query;
+  if (!runId) {
+    return res.status(400).json({ error: "Missing runId" });
+  }
+
   try {
-    const forceRefresh = req.query.forceRefresh === "1";
-    const records = await getAllRecordRows({ forceRefresh });
+    const records = await getAllRecordRows(runId);
 
     // Latest record per Bin — Timestamp strings sort correctly as text
     // since they're all the same fixed-width ISO format (see lib/time.js).

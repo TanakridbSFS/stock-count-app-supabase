@@ -58,6 +58,21 @@ export default function WarehouseDashboard() {
   const [hover, setHover] = useState(null); // bin cell + status fields
   const [lastUpdated, setLastUpdated] = useState(null);
   const [refreshing, setRefreshing] = useState(false);
+  const [runs, setRuns] = useState([]);
+  const [runId, setRunId] = useState("");
+  const runIdRef = useRef("");
+  runIdRef.current = runId;
+
+  useEffect(() => {
+    fetch("/api/admin/runs")
+      .then((r) => r.json())
+      .then((json) => {
+        const list = json.runs || [];
+        setRuns(list);
+        if (list.length > 0) setRunId((prev) => prev || list[0].id);
+      })
+      .catch(() => {});
+  }, []);
 
   // ---- three.js scene setup (once) ----
   useEffect(() => {
@@ -174,9 +189,10 @@ export default function WarehouseDashboard() {
     let stopped = false;
     let timer;
 
-    async function load(forceRefresh) {
+    async function load() {
+      if (!runIdRef.current) return;
       try {
-        const res = await fetch(`/api/dashboard/bins${forceRefresh ? "?forceRefresh=1" : ""}`);
+        const res = await fetch(`/api/dashboard/bins?runId=${encodeURIComponent(runIdRef.current)}`);
         const json = await res.json();
         if (!res.ok) throw new Error(json.error || "Failed to load dashboard data");
         if (stopped) return;
@@ -190,7 +206,7 @@ export default function WarehouseDashboard() {
           setStatus("error");
         }
       } finally {
-        if (!stopped) timer = setTimeout(() => load(false), POLL_MS);
+        if (!stopped) timer = setTimeout(() => load(), POLL_MS);
       }
     }
 
@@ -251,18 +267,19 @@ export default function WarehouseDashboard() {
 
     // Give the three.js init effect a moment to set up scene before the
     // first fetch tries to apply data to it.
-    const kickoff = setTimeout(() => load(false), 50);
+    const kickoff = setTimeout(() => load(), 50);
     return () => {
       stopped = true;
       clearTimeout(kickoff);
       clearTimeout(timer);
     };
-  }, []);
+  }, [runId]);
 
   async function handleForceRefresh() {
+    if (!runId) return;
     setRefreshing(true);
     try {
-      const res = await fetch("/api/dashboard/bins?forceRefresh=1");
+      const res = await fetch(`/api/dashboard/bins?runId=${encodeURIComponent(runId)}`);
       const json = await res.json();
       if (!res.ok) throw new Error(json.error || "Failed to refresh");
       // Re-apply through the same path the poller uses, by faking a tiny
@@ -335,6 +352,15 @@ export default function WarehouseDashboard() {
         <div style={{ opacity: 0.8, marginBottom: 8 }}>
           Drag to rotate · Scroll to zoom · Right-drag to pan
         </div>
+        <select
+          value={runId}
+          onChange={(e) => setRunId(e.target.value)}
+          style={{ marginBottom: 8, width: "100%", padding: "4px 6px", fontSize: 12 }}
+        >
+          {runs.map((r) => (
+            <option key={r.id} value={r.id}>{r.run_name}</option>
+          ))}
+        </select>
         <button
           onClick={handleForceRefresh}
           disabled={refreshing}

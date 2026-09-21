@@ -1,16 +1,17 @@
-import { getDistinctDateSummaries } from "../../../lib/googleSheets";
+import { getDistinctDateSummaries } from "../../../lib/db";
 
-// GET /api/admin/dates
-// Lists every date seen in CountRecord (most recent first), with how many
-// rows each has — used to populate the export screen's date picker, now
-// that there's no SessionID to filter by instead.
+// GET /api/admin/dates?runId=...
+// Lists every date seen in this Run's CountRecord rows (most recent first),
+// with how many rows each has — used to populate the export screen's date
+// picker.
 export default async function handler(req, res) {
   if (req.method !== "GET") {
     return res.status(405).json({ error: "Method not allowed" });
   }
+  const { runId } = req.query;
+  if (!runId) return res.status(400).json({ error: "Missing runId" });
   try {
-    const forceRefresh = req.query.forceRefresh === "1";
-    const dates = await getDistinctDateSummaries({ forceRefresh });
+    const dates = await getDistinctDateSummaries(runId);
     res.status(200).json({ dates });
   } catch (err) {
     console.error(err);

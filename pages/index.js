@@ -19,7 +19,7 @@ export default function StartPage() {
       return;
     }
     startSession({ counterName: counterName.trim() });
-    router.push("/scan");
+    router.push("/join");
   }
 
   if (!ready) return null;

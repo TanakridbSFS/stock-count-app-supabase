@@ -9,8 +9,11 @@ export default function ScanPage() {
   const inputRef = useRef(null);
 
   useEffect(() => {
-    if (ready && !session) {
+    if (!ready) return;
+    if (!session) {
       router.replace("/");
+    } else if (!session.runId) {
+      router.replace("/join");
     }
   }, [ready, session, router]);
 
@@ -32,13 +35,13 @@ export default function ScanPage() {
     router.push(`/count/${encodeURIComponent(bin)}`);
   }
 
-  if (!ready || !session) return null;
+  if (!ready || !session || !session.runId) return null;
 
   return (
     <div className="page">
       <div className="title">Scan Bin</div>
 
-      <div className="banner banner-info">{session.counterName}</div>
+      <div className="banner banner-info">{session.counterName} — {session.runName}</div>
 
       <div className="field">
         <label>Bin Location</label>
@@ -55,6 +58,9 @@ export default function ScanPage() {
 
       <button className="btn btn-primary" onClick={submitBin}>
         Go
+      </button>
+      <button className="btn btn-secondary" onClick={() => router.push("/join")}>
+        Change Run
       </button>
       <button className="btn btn-secondary" onClick={() => router.push("/")}>
         Change Counter

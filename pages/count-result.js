@@ -40,6 +40,8 @@ function diffStatus(diff) {
 }
 
 export default function CountResultPage() {
+  const [runs, setRuns] = useState([]);
+  const [runId, setRunId] = useState("");
   const [zone, setZone] = useState("ALL");
   const [search, setSearch] = useState("");
   const [diffFilter, setDiffFilter] = useState("ALL");
@@ -54,11 +56,24 @@ export default function CountResultPage() {
 
   const zoneRef = useRef(zone);
   zoneRef.current = zone;
+  const runIdRef = useRef(runId);
+  runIdRef.current = runId;
 
-  async function load(forceRefresh) {
+  useEffect(() => {
+    fetch("/api/admin/runs")
+      .then((r) => r.json())
+      .then((json) => {
+        const list = json.runs || [];
+        setRuns(list);
+        if (list.length > 0) setRunId((prev) => prev || list[0].id);
+      })
+      .catch(() => {});
+  }, []);
+
+  async function load() {
+    if (!runIdRef.current) return;
     try {
-      const params = new URLSearchParams({ zone: zoneRef.current });
-      if (forceRefresh) params.set("forceRefresh", "1");
+      const params = new URLSearchParams({ runId: runIdRef.current, zone: zoneRef.current });
       const res = await fetch(`/api/count-result?${params}`);
       const json = await res.json();
       if (!res.ok) throw new Error(json.error || "Failed to load count result");
@@ -73,15 +88,16 @@ export default function CountResultPage() {
   }
 
   useEffect(() => {
+    if (!runId) return;
     setStatus("loading");
-    load(false);
-    const timer = setInterval(() => load(false), POLL_MS);
+    load();
+    const timer = setInterval(() => load(), POLL_MS);
     return () => clearInterval(timer);
-  }, [zone]);
+  }, [zone, runId]);
 
   async function handleForceRefresh() {
     setRefreshing(true);
-    await load(true);
+    await load();
     setRefreshing(false);
   }
 
@@ -137,6 +153,15 @@ export default function CountResultPage() {
           </div>
         </div>
         <div style={{ textAlign: "right", fontSize: 13, color: "#666" }}>
+          <select
+            value={runId}
+            onChange={(e) => setRunId(e.target.value)}
+            style={{ marginBottom: 6, padding: "4px 8px", fontSize: 13 }}
+          >
+            {runs.map((r) => (
+              <option key={r.id} value={r.id}>{r.run_name}</option>
+            ))}
+          </select>
           {lastUpdated && <div>Updated {lastUpdated.toLocaleTimeString()} · auto every 1 min</div>}
           <button
             onClick={handleForceRefresh}

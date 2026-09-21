@@ -1,17 +1,27 @@
-import { getBinLines, findExistingCountForBinToday } from "../../../lib/googleSheets";
+import { getRunById, getBinLines, findExistingCountForBinToday } from "../../../lib/db";
 
-// GET /api/bin/:bin?page=1&pageSize=50
+// GET /api/bin/:bin?runId=...&page=1&pageSize=50
 export default async function handler(req, res) {
   if (req.method !== "GET") {
     return res.status(405).json({ error: "Method not allowed" });
   }
 
-  const { bin } = req.query;
+  const { bin, runId } = req.query;
   const page = Math.max(1, parseInt(req.query.page || "1", 10));
   const pageSize = Math.max(1, parseInt(req.query.pageSize || "50", 10));
 
+  if (!runId) {
+    return res.status(400).json({ error: "Missing runId — scan a Run barcode first." });
+  }
+
   try {
-    const allLines = await getBinLines(bin);
+    const run = await getRunById(runId);
+    if (!run) return res.status(404).json({ error: "Run not found" });
+    if (run.status !== "active") {
+      return res.status(400).json({ error: `Run "${run.run_name}" is closed` });
+    }
+
+    const allLines = await getBinLines(run.master_file_id, bin);
     const knownBin = allLines.length > 0;
 
     const total = allLines.length;
@@ -19,8 +29,8 @@ export default async function handler(req, res) {
     const start = (page - 1) * pageSize;
     const pageLines = allLines.slice(start, start + pageSize);
 
-    // No Session/Round ID anymore — "already counted" means today, by anyone.
-    const alreadyCounted = await findExistingCountForBinToday(bin);
+    // "Already counted" is scoped to this Run + today (Thai calendar day).
+    const alreadyCounted = await findExistingCountForBinToday(runId, bin);
 
     res.status(200).json({
       bin,
