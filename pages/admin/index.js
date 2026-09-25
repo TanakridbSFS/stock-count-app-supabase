@@ -11,10 +11,26 @@ export default function AdminConsole() {
   const [loadingDates, setLoadingDates] = useState(false);
 
   const [qrModal, setQrModal] = useState(null); // { runName, code, dataUrl }
+  const [progressByRunId, setProgressByRunId] = useState({});
 
   async function showQrCode(run) {
     const dataUrl = await QRCode.toDataURL(run.barcode_code, { width: 320, margin: 2 });
     setQrModal({ runName: run.run_name, code: run.barcode_code, dataUrl });
+  }
+
+  async function loadProgress(list) {
+    const entries = await Promise.all(
+      list.map(async (r) => {
+        try {
+          const res = await fetch(`/api/admin/progress?runId=${encodeURIComponent(r.id)}`);
+          const json = await res.json();
+          return [r.id, json];
+        } catch {
+          return [r.id, null];
+        }
+      })
+    );
+    setProgressByRunId(Object.fromEntries(entries));
   }
 
   async function loadRuns() {
@@ -24,6 +40,7 @@ export default function AdminConsole() {
       const list = json.runs || [];
       setRuns(list);
       if (list.length > 0) setSelectedRunId((prev) => prev || list[0].id);
+      loadProgress(list);
     } catch {
       // non-fatal
     }
@@ -124,25 +141,32 @@ export default function AdminConsole() {
                 <th>Run Name</th>
                 <th>Run ID</th>
                 <th>Status</th>
+                <th>Bins Counted</th>
+                <th>Qty Counted</th>
                 <th></th>
               </tr>
             </thead>
             <tbody>
-              {runs.map((r) => (
-                <tr key={r.id}>
-                  <td>{r.run_name}</td>
-                  <td style={{ fontFamily: "monospace" }}>{r.barcode_code}</td>
-                  <td>{r.status}</td>
-                  <td>
-                    <button className="btn btn-secondary btn-sm" onClick={() => showQrCode(r)}>
-                      QR Code
-                    </button>
-                  </td>
-                </tr>
-              ))}
+              {runs.map((r) => {
+                const p = progressByRunId[r.id];
+                return (
+                  <tr key={r.id}>
+                    <td>{r.run_name}</td>
+                    <td style={{ fontFamily: "monospace" }}>{r.barcode_code}</td>
+                    <td>{r.status}</td>
+                    <td>{p ? `${p.binsCounted}/${p.binsTotal}` : "…"}</td>
+                    <td>{p ? `${p.qtyCounted}/${p.qtyTotal}` : "…"}</td>
+                    <td>
+                      <button className="btn btn-secondary btn-sm" onClick={() => showQrCode(r)}>
+                        QR Code
+                      </button>
+                    </td>
+                  </tr>
+                );
+              })}
               {runs.length === 0 && (
                 <tr>
-                  <td colSpan={4} style={{ color: "#888" }}>
+                  <td colSpan={6} style={{ color: "#888" }}>
                     No runs yet.
                   </td>
                 </tr>
