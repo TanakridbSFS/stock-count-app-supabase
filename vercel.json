@@ -1,0 +1,7 @@
+{
+  "functions": {
+    "pages/api/admin/runs.js": {
+      "maxDuration": 60
+    }
+  }
+}
