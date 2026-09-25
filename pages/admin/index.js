@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
+import QRCode from "qrcode";
 
 export default function AdminConsole() {
   const [runs, setRuns] = useState([]);
@@ -8,6 +9,13 @@ export default function AdminConsole() {
   const [dates, setDates] = useState([]);
   const [selectedDate, setSelectedDate] = useState("ALL");
   const [loadingDates, setLoadingDates] = useState(false);
+
+  const [qrModal, setQrModal] = useState(null); // { runName, code, dataUrl }
+
+  async function showQrCode(run) {
+    const dataUrl = await QRCode.toDataURL(run.barcode_code, { width: 320, margin: 2 });
+    setQrModal({ runName: run.run_name, code: run.barcode_code, dataUrl });
+  }
 
   async function loadRuns() {
     try {
@@ -114,19 +122,27 @@ export default function AdminConsole() {
             <thead>
               <tr>
                 <th>Run Name</th>
+                <th>Run ID</th>
                 <th>Status</th>
+                <th></th>
               </tr>
             </thead>
             <tbody>
               {runs.map((r) => (
                 <tr key={r.id}>
                   <td>{r.run_name}</td>
+                  <td style={{ fontFamily: "monospace" }}>{r.barcode_code}</td>
                   <td>{r.status}</td>
+                  <td>
+                    <button className="btn btn-secondary btn-sm" onClick={() => showQrCode(r)}>
+                      QR Code
+                    </button>
+                  </td>
                 </tr>
               ))}
               {runs.length === 0 && (
                 <tr>
-                  <td colSpan={2} style={{ color: "#888" }}>
+                  <td colSpan={4} style={{ color: "#888" }}>
                     No runs yet.
                   </td>
                 </tr>
@@ -135,6 +151,37 @@ export default function AdminConsole() {
           </table>
         </div>
       </div>
+
+      {qrModal && (
+        <div
+          onClick={() => setQrModal(null)}
+          style={{
+            position: "fixed",
+            inset: 0,
+            background: "rgba(0,0,0,0.5)",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            zIndex: 1000,
+          }}
+        >
+          <div
+            onClick={(e) => e.stopPropagation()}
+            style={{ background: "#fff", borderRadius: 10, padding: 24, textAlign: "center" }}
+          >
+            <div style={{ fontWeight: 700, marginBottom: 8 }}>{qrModal.runName}</div>
+            <img src={qrModal.dataUrl} alt="Run QR code" style={{ width: 260, height: 260 }} />
+            <div style={{ fontFamily: "monospace", fontSize: 16, marginTop: 8 }}>{qrModal.code}</div>
+            <button
+              className="btn btn-secondary btn-sm"
+              style={{ marginTop: 14 }}
+              onClick={() => setQrModal(null)}
+            >
+              Close
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

@@ -35,19 +35,21 @@ export default async function handler(req, res) {
     const matchesZone = (bin) => zone === "ALL" || zoneOf(bin) === zone;
 
     const key = (mat, batch) => `${mat} ${batch}`;
-    const rows = new Map(); // key -> { mat, batch, matName, uom, expected, actual }
 
+    // Expected qty per Mat+Batch, from the master file — looked up for
+    // whichever lines actually got counted, not shown on its own.
+    const expectedByKey = new Map();
     for (const m of masterRows) {
       if (!matchesZone(m.Bin)) continue;
       const k = key(m.Mat, m.Batch);
-      let r = rows.get(k);
-      if (!r) {
-        r = { mat: m.Mat, batch: m.Batch, matName: m.MatName || "", uom: m.UOM || "", expected: 0, actual: 0 };
-        rows.set(k, r);
+      let e = expectedByKey.get(k);
+      if (!e) {
+        e = { qty: 0, matName: m.MatName || "", uom: m.UOM || "" };
+        expectedByKey.set(k, e);
       }
-      r.expected += Number(m.Qty) || 0;
-      if (!r.matName && m.MatName) r.matName = m.MatName;
-      if (!r.uom && m.UOM) r.uom = m.UOM;
+      e.qty += Number(m.Qty) || 0;
+      if (!e.matName && m.MatName) e.matName = m.MatName;
+      if (!e.uom && m.UOM) e.uom = m.UOM;
     }
 
     // Latest CountRecord row per (Bin, Mat, Batch) — a bin can be recounted,
@@ -63,15 +65,26 @@ export default async function handler(req, res) {
       }
     }
 
+    // Only Mat+Batch lines that were actually counted show up here —
+    // uncounted master rows are left out instead of appearing as a
+    // full "Short" diff.
+    const rows = new Map();
     for (const r of latestByLine.values()) {
       const k = key(r.Mat, r.Batch);
       let row = rows.get(k);
       if (!row) {
-        row = { mat: r.Mat, batch: r.Batch, matName: "", uom: r.UOM || "", expected: 0, actual: 0 };
+        const e = expectedByKey.get(k);
+        row = {
+          mat: r.Mat,
+          batch: r.Batch,
+          matName: e?.matName || "",
+          uom: e?.uom || r.UOM || "",
+          expected: e?.qty || 0,
+          actual: 0,
+        };
         rows.set(k, row);
       }
       row.actual += Number(r.CountedQty) || 0;
-      if (!row.uom && r.UOM) row.uom = r.UOM;
     }
 
     const result = Array.from(rows.values()).map((r) => ({
