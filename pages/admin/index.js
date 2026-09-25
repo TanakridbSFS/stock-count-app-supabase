@@ -142,7 +142,6 @@ export default function AdminConsole() {
                 <th>Run ID</th>
                 <th>Status</th>
                 <th>Bins Counted</th>
-                <th>Qty Counted</th>
                 <th></th>
               </tr>
             </thead>
@@ -155,7 +154,6 @@ export default function AdminConsole() {
                     <td style={{ fontFamily: "monospace" }}>{r.barcode_code}</td>
                     <td>{r.status}</td>
                     <td>{p ? `${p.binsCounted}/${p.binsTotal}` : "…"}</td>
-                    <td>{p ? `${p.qtyCounted}/${p.qtyTotal}` : "…"}</td>
                     <td>
                       <button className="btn btn-secondary btn-sm" onClick={() => showQrCode(r)}>
                         QR Code
@@ -166,7 +164,7 @@ export default function AdminConsole() {
               })}
               {runs.length === 0 && (
                 <tr>
-                  <td colSpan={6} style={{ color: "#888" }}>
+                  <td colSpan={5} style={{ color: "#888" }}>
                     No runs yet.
                   </td>
                 </tr>
