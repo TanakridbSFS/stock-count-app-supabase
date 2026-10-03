@@ -82,6 +82,16 @@ create index if not exists idx_count_records_run_bin_ts
   on count_records (run_id, bin, ts desc);
 ```
 
+### 1.1.1 v2 schema (Stocktake Events / Rounds / PI Docs / Teams)
+
+Apply `migrations/001_stocktake_v2.sql` in the SQL Editor after §1.1. It is
+additive (the tables above are unchanged). See `REQUIREMENTS_v2.md` for the
+concept. Admin pages for it: `/admin/events` (upload stock export + Bin
+Location Master, tag Warehouse Areas) and `/admin/teams` (Team01-58, QR
+codes, Picking/Reserve capability per storage location). All `/admin/*`
+pages and `/api/admin/*` routes require the admin name + passcode (session
+cookie, 12h).
+
 ### 1.2 API credentials
 
 Dashboard → Settings → API. You need:

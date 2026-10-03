@@ -242,3 +242,24 @@ button {
     gap: 0;
   }
 }
+
+/* ---- v2 admin additions ---- */
+.admin-userbar {
+  font-size: 13px;
+  color: #555;
+  text-align: right;
+  padding: 8px 16px 0;
+}
+.admin-table .num { text-align: right; }
+.cap-table td, .cap-table th { text-align: center; white-space: nowrap; }
+.cap-table td:first-child, .cap-table th:first-child { text-align: left; position: sticky; left: 0; background: #fff; }
+.cap-table input[type="checkbox"] { width: 18px; height: 18px; }
+.table-scroll { overflow-x: auto; }
+.qr-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 16px; }
+.qr-item { text-align: center; border: 1px dashed #bbb; border-radius: 8px; padding: 8px; break-inside: avoid; }
+.qr-item img { width: 130px; height: 130px; }
+.qr-item div { font-weight: 700; margin-top: 4px; }
+@media print {
+  .no-print, .admin-header, .admin-userbar { display: none !important; }
+  .page-admin { max-width: none; padding: 0; }
+}

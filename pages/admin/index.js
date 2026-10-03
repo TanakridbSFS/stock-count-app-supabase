@@ -1,8 +1,9 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import QRCode from "qrcode";
+import AdminGate from "../../components/AdminGate";
 
-export default function AdminConsole() {
+function AdminConsole() {
   const [runs, setRuns] = useState([]);
   const [selectedRunId, setSelectedRunId] = useState("");
 
@@ -81,7 +82,8 @@ export default function AdminConsole() {
         <nav className="admin-nav">
           <Link href="/scan">Go to counting app →</Link>
           <Link href="/dashboard">Live 3D Warehouse Dashboard</Link>
-          <Link href="/admin/runs">Run Setup</Link>
+          <Link href="/admin/events">Stocktake Events</Link>
+          <Link href="/admin/teams">Teams</Link>
         </nav>
       </div>
 
@@ -205,5 +207,13 @@ export default function AdminConsole() {
         </div>
       )}
     </div>
+  );
+}
+
+export default function AdminConsolePage() {
+  return (
+    <AdminGate>
+      <AdminConsole />
+    </AdminGate>
   );
 }

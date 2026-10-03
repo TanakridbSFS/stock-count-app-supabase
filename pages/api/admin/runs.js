@@ -1,3 +1,4 @@
+import { withAdmin } from "../../../lib/adminAuth";
 import * as XLSX from "xlsx";
 import QRCode from "qrcode";
 import { createMasterFileWithRows, createRun, listRuns } from "../../../lib/db";
@@ -18,7 +19,7 @@ function excelSerialToISODate(serial) {
 // GET  /api/admin/runs           — list all runs (newest first)
 // POST /api/admin/runs           — create a run: name it, upload its xlsx
 //   body: { runName, createdBy, fileName, fileDataBase64 }
-export default async function handler(req, res) {
+async function handler(req, res) {
   if (req.method === "GET") {
     try {
       const runs = await listRuns();
@@ -76,3 +77,5 @@ export default async function handler(req, res) {
 
   res.status(405).json({ error: "Method not allowed" });
 }
+
+export default withAdmin(handler);

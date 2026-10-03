@@ -1,9 +1,10 @@
+import { withAdmin } from "../../../lib/adminAuth";
 import { getRunById, getRunProgress } from "../../../lib/db";
 
 // GET /api/admin/progress?runId=...
 // Bins counted / total bins, and Qty counted / total expected Qty, for the
 // Admin Console's Runs table Progress columns.
-export default async function handler(req, res) {
+async function handler(req, res) {
   if (req.method !== "GET") {
     return res.status(405).json({ error: "Method not allowed" });
   }
@@ -19,3 +20,5 @@ export default async function handler(req, res) {
     res.status(500).json({ error: err.message || "Internal error" });
   }
 }
+
+export default withAdmin(handler);
