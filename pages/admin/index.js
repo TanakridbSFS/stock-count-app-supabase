@@ -84,6 +84,9 @@ function AdminConsole() {
           <Link href="/dashboard">Live 3D Warehouse Dashboard</Link>
           <Link href="/admin/events">Stocktake Events</Link>
           <Link href="/admin/teams">Teams</Link>
+          <Link href="/admin/control">Control (Rounds)</Link>
+          <Link href="/admin/progress">Progress</Link>
+          <Link href="/admin/report">Consolidated Report</Link>
         </nav>
       </div>
 

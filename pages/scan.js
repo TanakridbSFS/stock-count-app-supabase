@@ -10,16 +10,16 @@ export default function ScanPage() {
 
   useEffect(() => {
     if (!ready) return;
-    if (!session) {
+    if (!session?.counterName) {
       router.replace("/");
-    } else if (!session.runId) {
+    } else if (!session.piDocId) {
       router.replace("/join");
     }
   }, [ready, session, router]);
 
   useEffect(() => {
     // Keep focus on the scan field so the PDA's built-in scanner
-    // (keystroke/keyboard-wedge mode) can type into it. See spec §5.
+    // (keystroke/keyboard-wedge mode) can type into it.
     inputRef.current?.focus();
   });
 
@@ -35,13 +35,15 @@ export default function ScanPage() {
     router.push(`/count/${encodeURIComponent(bin)}`);
   }
 
-  if (!ready || !session || !session.runId) return null;
+  if (!ready || !session?.counterName || !session.piDocId) return null;
 
   return (
     <div className="page">
       <div className="title">Scan Bin</div>
 
-      <div className="banner banner-info">{session.counterName} — {session.runName}</div>
+      <div className="banner banner-info">
+        {session.counterName} — PI Doc {session.piDocNo} ({session.roundLabel})
+      </div>
 
       <div className="field">
         <label>Bin Location</label>
@@ -60,10 +62,10 @@ export default function ScanPage() {
         Go
       </button>
       <button className="btn btn-secondary" onClick={() => router.push("/join")}>
-        Change Run
+        Change PI Doc
       </button>
       <button className="btn btn-secondary" onClick={() => router.push("/")}>
-        Change Counter
+        Switch Team
       </button>
     </div>
   );

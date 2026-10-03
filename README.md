@@ -130,6 +130,18 @@ PDA's scanner won't be exercised until you're testing on the real device.
 5. On the PDA, add the URL to the home screen (browser menu → "Add to Home
    screen") so it opens like an app.
 
+## 3.1 v2 workflow (Stocktake Events) - supersedes §4 and the Run parts of §5
+
+1. Apply `migrations/001_stocktake_v2.sql` then `migrations/002_count_records_round.sql` (SQL Editor).
+2. `/admin` -> sign in (name + passcode) -> **Teams**: create Team01-Team58, tick Picking/Reserve per storage location, print QR codes.
+3. **Stocktake Events**: upload the stock export + Bin Location Master, then tag each Warehouse Area PRECOUNT / COUNT / EXCLUDED.
+4. **Control**: create a Pre-Count round (auto PI Docs) and/or Count#1 (upload the PI Doc file: columns Location + PI Doc No.). Later recounts: enter SKUs -> Count#2, #3 ... PI Docs are auto-generated.
+5. **PI Docs**: assign each PI Doc to one team (warns if the team lacks the Picking/Reserve capability), then **Activate** the round. Activating closes the other round in the same lane.
+6. PDA: scan Team QR -> pick/scan a PI Doc -> scan bins -> count (existing screens).
+7. **Progress** (Team x PI Doc) and **Consolidated Report** (latest round wins per Bin+Mat+Batch, optional Pre-Count, CSV).
+
+The old Run flow (`§4`, Run barcode on `/join`) no longer exists in the UI. The 3D Dashboard and Count Result pages still read old Run data.
+
 ## 4. Run Setup (`/admin/runs`) — start here for a new cycle count
 
 Each cycle-count round is a **Run** — a named batch tying together one

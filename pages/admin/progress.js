@@ -1,0 +1,175 @@
+import { useEffect, useMemo, useState } from "react";
+import Link from "next/link";
+import AdminGate from "../../components/AdminGate";
+
+// Team × PI Doc completion for one round.
+function ProgressPage() {
+  const [events, setEvents] = useState([]);
+  const [eventId, setEventId] = useState("");
+  const [rounds, setRounds] = useState([]);
+  const [roundId, setRoundId] = useState("");
+  const [data, setData] = useState(null);
+  const [error, setError] = useState("");
+
+  useEffect(() => {
+    fetch("/api/admin/events")
+      .then((r) => r.json())
+      .then((j) => {
+        const list = j.events || [];
+        setEvents(list);
+        if (list.length) setEventId(list[0].id);
+      });
+  }, []);
+
+  useEffect(() => {
+    if (!eventId) return;
+    fetch(`/api/admin/rounds?eventId=${eventId}`)
+      .then((r) => r.json())
+      .then((j) => {
+        const list = j.rounds || [];
+        setRounds(list);
+        const active = list.find((r) => r.status === "ACTIVE") || list[list.length - 1];
+        setRoundId(active ? active.id : "");
+      });
+  }, [eventId]);
+
+  async function load() {
+    if (!roundId) return setData(null);
+    const res = await fetch(`/api/admin/pidocs?roundId=${roundId}`);
+    const json = await res.json();
+    if (!res.ok) return setError(json.error || "Failed to load");
+    setError("");
+    setData(json);
+  }
+
+  useEffect(() => {
+    load();
+    const t = setInterval(load, 60000); // refresh every minute while left open
+    return () => clearInterval(t);
+  }, [roundId]);
+
+  const byTeam = useMemo(() => {
+    const m = new Map();
+    for (const d of data?.piDocs || []) {
+      const name = d.teamName || "— unassigned —";
+      const t = m.get(name) || { name, docs: [], bins: 0, counted: 0, docsDone: 0 };
+      t.docs.push(d);
+      t.bins += d.binCount;
+      t.counted += d.binsCounted;
+      if (d.binCount > 0 && d.binsCounted >= d.binCount) t.docsDone += 1;
+      m.set(name, t);
+    }
+    return [...m.values()].sort((a, b) => a.name.localeCompare(b.name));
+  }, [data]);
+
+  const totals = byTeam.reduce(
+    (a, t) => ({ bins: a.bins + t.bins, counted: a.counted + t.counted, docs: a.docs + t.docs.length, done: a.done + t.docsDone }),
+    { bins: 0, counted: 0, docs: 0, done: 0 }
+  );
+  const pct = (n, d) => (d ? Math.round((n / d) * 100) : 0);
+
+  return (
+    <div className="page page-admin">
+      <div className="admin-header">
+        <div className="title">Progress — Team × PI Doc</div>
+        <nav className="admin-nav">
+          <Link href="/admin">← Admin Console</Link>
+          <Link href="/admin/control">Control</Link>
+          <Link href="/admin/report">Report</Link>
+        </nav>
+      </div>
+
+      {error && <div className="banner banner-warn">{error}</div>}
+
+      <div className="field-row">
+        <div className="field">
+          <label>Stocktake Event</label>
+          <select value={eventId} onChange={(e) => setEventId(e.target.value)}>
+            {events.map((e) => (
+              <option key={e.id} value={e.id}>
+                {e.name}
+              </option>
+            ))}
+          </select>
+        </div>
+        <div className="field">
+          <label>Round</label>
+          <select value={roundId} onChange={(e) => setRoundId(e.target.value)}>
+            {rounds.map((r) => (
+              <option key={r.id} value={r.id}>
+                {r.label} ({r.status})
+              </option>
+            ))}
+          </select>
+        </div>
+      </div>
+
+      {data && (
+        <>
+          <div className="banner banner-info">
+            PI Docs complete <b>{totals.done}</b> / {totals.docs} · Bins counted <b>{totals.counted}</b> / {totals.bins} (
+            {pct(totals.counted, totals.bins)}%) · auto-refreshes every minute
+          </div>
+          <div className="card">
+            <table className="admin-table">
+              <thead>
+                <tr>
+                  <th>Team</th>
+                  <th className="num">PI Docs</th>
+                  <th className="num">Done</th>
+                  <th className="num">Bins counted</th>
+                  <th className="num">%</th>
+                  <th>PI Docs (counted/total)</th>
+                </tr>
+              </thead>
+              <tbody>
+                {byTeam.map((t) => (
+                  <tr key={t.name}>
+                    <td>{t.name}</td>
+                    <td className="num">{t.docs.length}</td>
+                    <td className="num">{t.docsDone}</td>
+                    <td className="num">
+                      {t.counted}/{t.bins}
+                    </td>
+                    <td className="num">{pct(t.counted, t.bins)}%</td>
+                    <td style={{ fontSize: 13 }}>
+                      {t.docs.map((d) => (
+                        <span
+                          key={d.id}
+                          style={{
+                            display: "inline-block",
+                            margin: "2px 6px 2px 0",
+                            padding: "2px 6px",
+                            borderRadius: 6,
+                            background: d.binsCounted >= d.binCount && d.binCount > 0 ? "#dcfce7" : d.binsCounted > 0 ? "#fef3c7" : "#f3f4f6",
+                          }}
+                        >
+                          {d.pi_doc_no} {d.binsCounted}/{d.binCount}
+                        </span>
+                      ))}
+                    </td>
+                  </tr>
+                ))}
+                {byTeam.length === 0 && (
+                  <tr>
+                    <td colSpan={6} style={{ color: "#888" }}>
+                      No PI Docs in this round.
+                    </td>
+                  </tr>
+                )}
+              </tbody>
+            </table>
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
+export default function ProgressPageWithGate() {
+  return (
+    <AdminGate>
+      <ProgressPage />
+    </AdminGate>
+  );
+}

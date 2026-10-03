@@ -1,18 +1,19 @@
-import { getRunById, appendCountRecords } from "../../lib/db";
+import { appendRoundCountRecords } from "../../lib/db";
+import { resolvePiDocForTeam, assertBinInPiDoc } from "../../lib/pda";
 import { padBatch } from "../../lib/binMasterConvert";
 import { nowThailandISOString } from "../../lib/time";
 
 // POST /api/count
-// body: { runId, counterName, bin, deviceId, lines: [{ mat, batch, uom, expectedQty, countedQty, lineType }] }
+// body: { piDocId, counterName (= team name), bin, deviceId, lines: [{ mat, batch, uom, expectedQty, countedQty, lineType }] }
 export default async function handler(req, res) {
   if (req.method !== "POST") {
     return res.status(405).json({ error: "Method not allowed" });
   }
 
-  const { runId, counterName, bin, deviceId, lines } = req.body || {};
+  const { piDocId, counterName, bin, deviceId, lines } = req.body || {};
 
-  if (!runId || !counterName || !bin || !Array.isArray(lines) || lines.length === 0) {
-    return res.status(400).json({ error: "Missing runId, counterName, bin, or lines" });
+  if (!piDocId || !counterName || !bin || !Array.isArray(lines) || lines.length === 0) {
+    return res.status(400).json({ error: "Missing piDocId, counterName, bin, or lines" });
   }
 
   const validTypes = new Set(["MATCH", "ADJUSTED", "NEW", "ZERO", "EMPTY"]);
@@ -23,16 +24,14 @@ export default async function handler(req, res) {
   }
 
   try {
-    const run = await getRunById(runId);
-    if (!run) return res.status(404).json({ error: "Run not found" });
-    if (run.status !== "active") {
-      return res.status(400).json({ error: `Run "${run.run_name}" is closed` });
-    }
+    // The team must own the PI Doc, its round must be ACTIVE, and the bin must be in the PI Doc.
+    const { team, piDoc, round } = await resolvePiDocForTeam(piDocId, counterName);
+    await assertBinInPiDoc(piDocId, bin);
 
     const timestamp = nowThailandISOString();
     const rows = lines.map((line) => ({
       Timestamp: timestamp,
-      CounterName: counterName,
+      CounterName: team.name,
       Bin: bin,
       Mat: line.mat || "",
       // Always a 10-digit text code — pad it here too, since a manually
@@ -46,9 +45,10 @@ export default async function handler(req, res) {
       DeviceID: deviceId || "",
     }));
 
-    await appendCountRecords(runId, rows);
+    await appendRoundCountRecords({ roundId: round.id, piDocId: piDoc.id, teamName: team.name }, rows);
     res.status(200).json({ ok: true, written: rows.length });
   } catch (err) {
+    if (err.status) return res.status(err.status).json({ error: err.message });
     console.error(err);
     res.status(500).json({ error: err.message || "Internal error" });
   }

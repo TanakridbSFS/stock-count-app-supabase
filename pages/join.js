@@ -2,89 +2,116 @@ import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/router";
 import { useSession } from "../lib/useSession";
 
-// Between "who's counting" (/) and "which bin" (/scan) — scan the Run
-// barcode (printed/shown from /admin/runs) to attach this device to a
-// specific cycle-count Run for the rest of the session.
-export default function JoinRunPage() {
+// Between team login (/) and bin scanning (/scan): pick one of the PI Docs
+// assigned to this team in a currently ACTIVE round (tap it, or scan the
+// PI Doc number).
+export default function JoinPiDocPage() {
   const router = useRouter();
-  const { session, ready, setRun } = useSession();
+  const { session, ready, setPiDoc } = useSession();
+  const [piDocs, setPiDocs] = useState(null);
   const [code, setCode] = useState("");
   const [error, setError] = useState("");
-  const [loading, setLoading] = useState(false);
   const inputRef = useRef(null);
 
   useEffect(() => {
-    if (ready && !session) router.replace("/");
+    if (ready && !session?.counterName) router.replace("/");
   }, [ready, session, router]);
+
+  async function load() {
+    if (!session?.counterName) return;
+    setError("");
+    try {
+      const res = await fetch(`/api/pda/pidocs?team=${encodeURIComponent(session.counterName)}`);
+      const json = await res.json();
+      if (!res.ok) throw new Error(json.error || "Failed to load PI Docs");
+      setPiDocs(json.piDocs);
+    } catch (e) {
+      setError(e.message);
+      setPiDocs([]);
+    }
+  }
+
+  useEffect(() => {
+    load();
+  }, [session?.counterName]);
 
   useEffect(() => {
     inputRef.current?.focus();
   });
 
-  async function submitCode() {
+  function choose(d) {
+    setPiDoc({ piDocId: d.id, piDocNo: d.piDocNo, roundLabel: d.roundLabel });
+    router.push("/scan");
+  }
+
+  function submitCode() {
     const value = code.trim();
     if (!value) return;
-    setLoading(true);
-    setError("");
-    try {
-      const res = await fetch(`/api/runs/${encodeURIComponent(value)}`);
-      const json = await res.json();
-      if (!res.ok) throw new Error(json.error || "Run not found");
-      setRun({ runId: json.runId, runName: json.runName });
-      router.push("/scan");
-    } catch (e) {
-      setError(e.message);
+    const found = (piDocs || []).find((d) => String(d.piDocNo) === value);
+    if (!found) {
+      setError(`PI Doc ${value} is not assigned to ${session.counterName} in an active round.`);
       setCode("");
-    } finally {
-      setLoading(false);
+      return;
     }
+    choose(found);
   }
 
-  function handleKeyDown(e) {
-    if (e.key === "Enter") {
-      e.preventDefault();
-      submitCode();
-    }
-  }
-
-  if (!ready || !session) return null;
+  if (!ready || !session?.counterName) return null;
 
   return (
     <div className="page">
-      <div className="title">Join a Count Run</div>
+      <div className="title">Select PI Doc</div>
       <div className="banner banner-info">{session.counterName}</div>
-
-      {session.runName && (
-        <div className="banner banner-info">
-          Currently in: <b>{session.runName}</b> — scan a different Run barcode to switch.
-        </div>
-      )}
 
       {error && <div className="banner banner-warn">{error}</div>}
 
       <div className="field">
-        <label>Run Barcode</label>
+        <label>Scan PI Doc number</label>
         <input
           ref={inputRef}
           value={code}
           onChange={(e) => setCode(e.target.value)}
-          onKeyDown={handleKeyDown}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") {
+              e.preventDefault();
+              submitCode();
+            }
+          }}
           onBlur={() => inputRef.current?.focus()}
-          placeholder="Scan the Run barcode, then Enter"
+          placeholder="Scan or type PI Doc no., then Enter"
           autoFocus
-          disabled={loading}
         />
       </div>
 
-      <button className="btn btn-primary" onClick={submitCode} disabled={loading}>
-        {loading ? "Checking…" : "Join Run"}
-      </button>
-
-      {session.runId && (
-        <button className="btn btn-secondary" onClick={() => router.push("/scan")}>
-          Continue in "{session.runName}"
-        </button>
+      {piDocs === null && <div className="banner banner-info">Loading…</div>}
+      {piDocs && piDocs.length === 0 && !error && (
+        <div className="banner banner-warn">
+          No PI Docs for {session.counterName} in an active round. Ask the admin to assign one and activate its round.
+        </div>
       )}
+
+      {(piDocs || []).map((d) => (
+        <button
+          key={d.id}
+          className={`btn ${session.piDocId === d.id ? "btn-primary" : "btn-secondary"}`}
+          onClick={() => choose(d)}
+          style={{ textAlign: "left" }}
+        >
+          <div style={{ fontWeight: 700 }}>
+            {d.piDocNo} · {d.roundLabel}
+          </div>
+          <div style={{ fontSize: 14, fontWeight: 400 }}>
+            {d.storage} {d.zone} · {d.binsCounted}/{d.binCount} bins counted
+          </div>
+        </button>
+      ))}
+
+      <button className="btn btn-secondary" onClick={load}>
+        Refresh list
+      </button>
+      <button className="btn btn-secondary" onClick={() => router.push("/")}>
+        Switch Team
+      </button>
     </div>
   );
 }

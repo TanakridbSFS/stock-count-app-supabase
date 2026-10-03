@@ -34,3 +34,15 @@ First reference for any session. Append a dated entry after each stage.
 ## Next
 - User tries the UI locally (`npm run dev`): create Teams, create an event with the two real files, tag areas.
 - Phase 3: rounds + Control page, Count#1 PI Doc upload, Pre-Count/Count#2+ PI Doc auto-gen, PI Doc -> Team assignment.
+
+## 2026-10-04 — Phases 3-5 (rounds, PI Docs, PDA flow, reports) — code done
+1. Added `migrations/002_count_records_round.sql` (run_id nullable + check: exactly one of run_id / count_round_id). **Must be run in Supabase SQL Editor before PDAs can save counts** (the e2e test showed the save failing on `run_id` NOT NULL without it).
+2. Phase 3: `/admin/control` (per-lane rounds, Activate auto-closes the other round in the lane, Pre-Count auto-gen, Count#1 from PI Doc file, Count#2+ from SKU list), `/admin/pidocs` (assign PI Docs to teams; capability mismatch -> confirm to override; CLOSED rounds locked). PI Doc auto-gen = `lib/piGen.js` (5 bins, never crosses storage location / Picking-Reserve / lane / level / odd-even face; numbering continues from max pi_doc_no). DISABLE bins and areas of type OTHER are skipped.
+3. Phase 4 (PDA): `/` = Team QR login (localStorage key bumped to v2), `/join` = pick/scan a PI Doc assigned to the team in an ACTIVE round, `/scan` + `/count/[bin]` scoped to the PI Doc (bin must be in the PI Doc; team must own it; round must be ACTIVE). `/api/count` writes count_round_id / pi_doc_id / team_name. Old `/api/runs/[code]` removed.
+4. Phase 5: `/admin/progress` (Team x PI Doc, auto-refresh 60s), `/admin/report` + `/api/admin/report` (consolidated per Bin+Mat+Batch, latest round wins, Pre-Count toggle, NOT COUNTED lines, CSV).
+5. Verified: `next build` OK; e2e against live DB with self-deleting test rows (Team99 / ZZTEST event): 33 checks behaved as designed (auth, tagging gate, Count#1 import validation, capability warning, activation exclusivity, PDA scoping, recount gen, report). Only the count save failed, as expected without migration 002. Test rows were deleted.
+6. Not re-done for v2 (still on old Run data): `/dashboard` (3D), `/count-result`, and the Admin Console's old Runs/Export cards.
+
+## Next
+- User: run migration 002, create Teams, create an event, tag areas, Count#1 upload, assign, activate, then try a PDA.
+- Decide whether to port `/dashboard` and `/count-result` to rounds.

@@ -79,18 +79,19 @@ export default function CountBinPage() {
   useEffect(() => {
     if (!ready) return;
     if (!session) router.replace("/");
-    else if (!session.runId) router.replace("/join");
+    else if (!session.piDocId) router.replace("/join");
   }, [ready, session, router]);
 
   const lineKey = (l) => `${l.Mat}|${l.Batch}|${l.UOM}`;
 
   const load = useCallback(async () => {
-    if (!bin || !session || !session.runId) return;
+    if (!bin || !session || !session.piDocId) return;
     setLoading(true);
     setError("");
     try {
       const params = new URLSearchParams({
-        runId: session.runId,
+        piDocId: session.piDocId,
+        teamName: session.counterName,
         page: String(page),
         pageSize: String(pageSize),
       });
@@ -266,7 +267,7 @@ export default function CountBinPage() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          runId: session.runId,
+          piDocId: session.piDocId,
           counterName: session.counterName,
           deviceId: session.deviceId,
           bin,
@@ -293,7 +294,7 @@ export default function CountBinPage() {
     }
   }
 
-  if (!ready || !session || !session.runId) return null;
+  if (!ready || !session || !session.piDocId) return null;
 
   const alreadyCounted = data?.alreadyCounted || [];
   const showRecountWarning = alreadyCounted.length > 0 && !overrideRecount;
@@ -301,7 +302,7 @@ export default function CountBinPage() {
   return (
     <div className="page">
       <div className="title">Bin: {bin}</div>
-      <div className="banner banner-info">{session.counterName}</div>
+      <div className="banner banner-info">{session.counterName} — PI Doc {session.piDocNo}</div>
 
       {showRecountWarning && (
         <div className="banner banner-warn">
