@@ -1,4 +1,4 @@
-import { getBinLines, findExistingRoundCountToday } from "../../../lib/db";
+import { getBinLines, getRoundBinRecords } from "../../../lib/db";
 import { resolvePiDocForTeam, assertBinInPiDoc } from "../../../lib/pda";
 
 // GET /api/bin/:bin?piDocId=...&teamName=...&page=1&pageSize=50
@@ -15,32 +15,31 @@ export default async function handler(req, res) {
     const { round, event } = await resolvePiDocForTeam(piDocId, teamName);
     await assertBinInPiDoc(piDocId, bin);
 
-    const allLines = await getBinLines(event.bin_master_file_id, bin);
-    const knownBin = allLines.length > 0;
+    // Pre-Count is a blind count: the Bin Master items are not shown, the
+    // counter only adds what is physically there.
+    const blind = round.lane === "PRECOUNT";
+    const allLines = blind ? [] : await getBinLines(event.bin_master_file_id, bin);
+    const knownBin = blind ? true : allLines.length > 0;
 
     const total = allLines.length;
     const totalPages = Math.max(1, Math.ceil(total / pageSize));
     const start = (page - 1) * pageSize;
     const pageLines = allLines.slice(start, start + pageSize);
 
-    // "Already counted" is scoped to this round + today (Thai calendar day).
-    const alreadyCounted = await findExistingRoundCountToday(round.id, bin);
+    // One saved result per bin per round — shown again on a re-scan so the
+    // counter can edit or remove lines; saving replaces it.
+    const saved = await getRoundBinRecords(round.id, bin);
 
     res.status(200).json({
       bin,
+      blind,
       knownBin,
       total,
       page,
       pageSize,
       totalPages,
       lines: pageLines,
-      alreadyCounted: alreadyCounted.map((r) => ({
-        Mat: r.Mat,
-        Batch: r.Batch,
-        UOM: r.UOM,
-        CounterName: r.CounterName,
-        Timestamp: r.Timestamp,
-      })),
+      saved,
     });
   } catch (err) {
     if (err.status) return res.status(err.status).json({ error: err.message });

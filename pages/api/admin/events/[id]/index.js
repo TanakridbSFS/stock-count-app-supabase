@@ -1,5 +1,6 @@
 import { withAdmin } from "../../../../../lib/adminAuth";
 import { db, fetchAll } from "../../../../../lib/stocktake";
+import { normAreaName } from "../../../../../lib/areaNames";
 
 // GET /api/admin/events/:id — event + per-area summary + current tags
 async function handler(req, res) {
@@ -46,14 +47,14 @@ async function handler(req, res) {
       .from("area_classification_defaults")
       .select("warehouse_area_code, classification");
     if (defErr) throw defErr;
-    const defaultByArea = Object.fromEntries(defs.map((d) => [d.warehouse_area_code, d.classification]));
+    const defaultByArea = Object.fromEntries(defs.map((d) => [normAreaName(d.warehouse_area_code), d.classification]));
 
     const areas = Array.from(byArea.values())
       .sort((a, b) => a.area.localeCompare(b.area))
       .map((a) => ({
         ...a,
         classification: tagByArea[a.area] || null,
-        defaultTag: defaultByArea[a.area] || null,
+        defaultTag: defaultByArea[normAreaName(a.area)] || null,
       }));
 
     res.status(200).json({ event, binCount: bins.length, areas });

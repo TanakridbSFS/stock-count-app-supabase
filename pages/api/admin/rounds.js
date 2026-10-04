@@ -65,7 +65,7 @@ async function handler(req, res, admin) {
         }
         const round = await createRound({ eventId, lane, createdBy: admin.name });
         try {
-          const piDocCount = await autoGeneratePiDocs(round.id, bins);
+          const piDocCount = await autoGeneratePiDocs(round, bins);
           return res.status(200).json({ round, piDocCount, binCount: bins.length });
         } catch (e) {
           await deleteRound(round.id);
@@ -141,12 +141,16 @@ async function handler(req, res, admin) {
 
         const { data: clash, error: clashErr } = await supabase
           .from("pi_docs")
-          .select("pi_doc_no")
+          .select("pi_doc_no, count_rounds(lane, round_number)")
           .in("pi_doc_no", docs.map((d) => d.piDocNo));
         if (clashErr) throw clashErr;
         if (clash.length) {
+          const list = clash
+            .slice(0, 10)
+            .map((c) => `${c.pi_doc_no} (in ${roundLabel(c.count_rounds.lane, c.count_rounds.round_number)})`)
+            .join(", ");
           return res.status(400).json({
-            error: `PI Doc number(s) already exist in the system: ${clash.slice(0, 10).map((c) => c.pi_doc_no).join(", ")}`,
+            error: `${clash.length} PI Doc number(s) in the file already exist in the system: ${list}${clash.length > 10 ? "…" : ""}`,
           });
         }
 
@@ -201,7 +205,7 @@ async function handler(req, res, admin) {
 
       const round = await createRound({ eventId, lane, createdBy: admin.name });
       try {
-        const piDocCount = await autoGeneratePiDocs(round.id, bins);
+        const piDocCount = await autoGeneratePiDocs(round, bins);
         return res.status(200).json({
           round,
           piDocCount,

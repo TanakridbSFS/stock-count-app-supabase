@@ -3,6 +3,16 @@ import Link from "next/link";
 import AdminGate from "../../components/AdminGate";
 import { postJson, parsePiDocFile } from "../../lib/adminUpload";
 
+// Empty PI Doc assignment file (Location + PI Doc No. columns) to fill in.
+async function downloadPiDocTemplate() {
+  const XLSX = await import("xlsx");
+  const ws = XLSX.utils.aoa_to_sheet([["Location", "PI Doc No."]]);
+  ws["!cols"] = [{ wch: 24 }, { wch: 16 }];
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, "Sheet1");
+  XLSX.writeFile(wb, "PI_Doc_Template.xlsx");
+}
+
 const LANE_TITLE = { PRECOUNT: "Pre-Count lane", COUNT: "Count lane" };
 
 function ControlPage() {
@@ -13,6 +23,7 @@ function ControlPage() {
   const [msg, setMsg] = useState("");
   const [busy, setBusy] = useState(false);
   const [piFile, setPiFile] = useState(null);
+  const [piPreview, setPiPreview] = useState(""); // what the chosen file contains
   const [skuText, setSkuText] = useState("");
 
   useEffect(() => {
@@ -50,6 +61,19 @@ function ControlPage() {
       setError(e.message);
     } finally {
       setBusy(false);
+    }
+  }
+
+  async function choosePiFile(file) {
+    setPiFile(file);
+    setPiPreview("");
+    if (!file) return;
+    try {
+      const rows = await parsePiDocFile(file);
+      const docs = new Set(rows.map((r) => String(r.piDoc).trim()));
+      setPiPreview(`${rows.length} bins in ${docs.size} PI Docs found in the file.`);
+    } catch (e) {
+      setPiPreview(`Cannot read the file: ${e.message}`);
     }
   }
 
@@ -170,7 +194,8 @@ function ControlPage() {
         {l === "PRECOUNT" && (
           <div style={{ marginTop: 14 }}>
             <div className="card-subtext">
-              A new Pre-Count round takes every bin in PRECOUNT-tagged areas and auto-builds PI Docs (5 contiguous bins each).
+              A new Pre-Count round takes every bin in PRECOUNT-tagged areas and auto-builds PI Docs (5 contiguous bins each),
+              numbered Pre-202610XXXX (from round 2: Pre-202610XXXX-2).
             </div>
             <button className="btn btn-primary btn-sm" disabled={busy || !eventId} onClick={createPrecount}>
               Create Pre-Count{list.length + 1}
@@ -181,10 +206,16 @@ function ControlPage() {
         {l === "COUNT" && countRounds.length === 0 && (
           <div style={{ marginTop: 14 }}>
             <div className="card-subtext">
-              Count#1 uses the PI Doc assignment file (columns <b>Location</b> and <b>PI Doc No.</b>).
+              Count#1 uses the PI Doc assignment file (columns <b>Location</b> and <b>PI Doc No.</b>; one row per bin, bins
+              sharing a PI Doc No. form one PI Doc, each PI Doc inside one Warehouse Area). PI Doc numbers are used as
+              written.{" "}
+              <button className="btn btn-secondary btn-sm" onClick={downloadPiDocTemplate}>
+                Download template
+              </button>
             </div>
             <div className="field">
-              <input type="file" accept=".xlsx,.xls" onChange={(e) => setPiFile(e.target.files?.[0] || null)} />
+              <input type="file" accept=".xlsx,.xls" onChange={(e) => choosePiFile(e.target.files?.[0] || null)} />
+              {piPreview && <div style={{ fontSize: 13, marginTop: 4 }}>{piPreview}</div>}
             </div>
             <button className="btn btn-primary btn-sm" disabled={busy || !eventId || !piFile} onClick={createCount1}>
               Create Count#1 from file
@@ -196,6 +227,8 @@ function ControlPage() {
           <div style={{ marginTop: 14 }}>
             <div className="card-subtext">
               Recount: enter the SKU (Mat) codes to recount. PI Docs are built from the bins that hold them in the Bin Master (COUNT-tagged areas only).
+              The codes must match the SKU column of the Stock export used for this event, e.g. <b>10301167</b>.
+              New PI Doc numbers continue the Count sequence and end with the round number (e.g. 2026100019-2).
             </div>
             <div className="field">
               <textarea
