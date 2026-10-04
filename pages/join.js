@@ -101,7 +101,8 @@ export default function JoinPiDocPage() {
             {d.piDocNo} · {d.roundLabel}
           </div>
           <div style={{ fontSize: 14, fontWeight: 400 }}>
-            {d.storage} {d.zone} · {d.binsCounted}/{d.binCount} bins counted
+            {d.area} · {d.binsCounted}/{d.binCount} bins counted
+            {d.binCount > 0 && d.binsCounted >= d.binCount ? " ✓ Done" : ""}
           </div>
         </button>
       ))}

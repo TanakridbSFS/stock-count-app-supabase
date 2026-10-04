@@ -125,17 +125,17 @@ async function handler(req, res, admin) {
         const docs = [];
         const mixed = [];
         for (const [piDoc, bins] of byDoc) {
-          const kinds = new Set(bins.map((b) => `${binInfo.get(b).storage}|${binInfo.get(b).zone}`));
-          if (kinds.size > 1) {
+          const areas = new Set(bins.map((b) => binInfo.get(b).area));
+          if (areas.size > 1) {
             mixed.push(piDoc);
             continue;
           }
           const first = binInfo.get(bins[0]);
-          docs.push({ piDocNo: piDoc, storage: first.storage, zone: first.zone, bins });
+          docs.push({ piDocNo: piDoc, area: first.area, storage: first.storage, zone: first.zone, bins });
         }
         if (mixed.length) {
           return res.status(400).json({
-            error: `PI Doc(s) mix Picking/Reserve or storage locations: ${mixed.slice(0, 10).join(", ")}`,
+            error: `PI Doc(s) mix more than one Warehouse Area:${mixed.slice(0, 10).join(", ")}`,
           });
         }
 

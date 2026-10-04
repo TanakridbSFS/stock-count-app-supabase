@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 import QRCode from "qrcode";
 import AdminGate from "../../components/AdminGate";
+import MultiSelect from "../../components/MultiSelect";
 import { postJson } from "../../lib/adminUpload";
 
 function TeamsPage() {
@@ -10,7 +11,6 @@ function TeamsPage() {
   const [from, setFrom] = useState("1");
   const [to, setTo] = useState("58");
   const [newName, setNewName] = useState("");
-  const [newLoc, setNewLoc] = useState("");
   const [error, setError] = useState("");
   const [msg, setMsg] = useState("");
   const [qrs, setQrs] = useState(null); // [{ name, dataUrl }] while the print view is open
@@ -23,7 +23,7 @@ function TeamsPage() {
       return;
     }
     setTeams(json.teams);
-    setLocations((prev) => Array.from(new Set([...json.storageLocations, ...prev])).sort());
+    setLocations(json.storageLocations);
   }
 
   useEffect(() => {
@@ -63,20 +63,11 @@ function TeamsPage() {
       await load();
     });
 
-  function setCap(team, loc, field, value) {
+  function setCap(team, patch) {
     // optimistic update, then persist
-    const cur = team.capabilities[loc] || { can_picking: false, can_reserve: false };
-    const next = { ...cur, [field]: value };
-    setTeams((ts) =>
-      ts.map((t) => (t.id === team.id ? { ...t, capabilities: { ...t.capabilities, [loc]: next } } : t))
-    );
-    run(() =>
-      postJson("/api/admin/teams", "PATCH", {
-        teamId: team.id,
-        storageLocation: loc,
-        ...next,
-      })
-    );
+    const next = { locations: team.locations, types: team.types, ...patch };
+    setTeams((ts) => ts.map((t) => (t.id === team.id ? { ...t, ...next } : t)));
+    run(() => postJson("/api/admin/teams", "PATCH", { teamId: team.id, ...next }));
   }
 
   async function openQrs() {
@@ -155,55 +146,23 @@ function TeamsPage() {
           </button>
         </div>
 
-        <div className="card">
-          <div className="card-title">Storage locations</div>
-          <div className="card-subtext">
-            Taken from the uploaded Bin Location Masters. Add one manually if
-            it isn't listed yet.
-          </div>
-          <div style={{ marginBottom: 8 }}>{locations.join(", ") || "None yet"}</div>
-          <div className="field-row">
-            <div className="field">
-              <input value={newLoc} onChange={(e) => setNewLoc(e.target.value)} placeholder="e.g. D001" />
-            </div>
-          </div>
-          <button
-            className="btn btn-secondary btn-sm"
-            onClick={() => {
-              const v = newLoc.trim().toUpperCase();
-              if (v) setLocations((l) => Array.from(new Set([...l, v])).sort());
-              setNewLoc("");
-            }}
-          >
-            Add location
-          </button>
-        </div>
       </div>
 
       <div className="card" style={{ marginTop: 20 }}>
         <div className="card-title">Capabilities ({teams.length} teams)</div>
         <div className="card-subtext">
-          Per storage location: <b>P</b> = can count Picking, <b>R</b> = can
-          count Reserve (needs crane). Changes save immediately.
+          Count rounds only. A team may count every combination of its Storage
+          Locations × Types — e.g. <b>Team01 | F001, C001 | Picking, Reserve</b>{" "}
+          means F001 Picking, F001 Reserve, C001 Picking and C001 Reserve.
+          Pre-Count is never restricted. Changes save immediately.
         </div>
-        <div className="table-scroll">
+        <div className="table-scroll" style={{ minHeight: 260 }}>
           <table className="admin-table cap-table">
             <thead>
               <tr>
                 <th>Team</th>
-                {locations.map((l) => (
-                  <th key={l} colSpan={2}>
-                    {l}
-                  </th>
-                ))}
-                <th></th>
-              </tr>
-              <tr>
-                <th></th>
-                {locations.map((l) => [
-                  <th key={l + "p"}>P</th>,
-                  <th key={l + "r"}>R</th>,
-                ])}
+                <th>Storage Location</th>
+                <th>Picking / Reserve</th>
                 <th></th>
               </tr>
             </thead>
@@ -211,25 +170,23 @@ function TeamsPage() {
               {teams.map((t) => (
                 <tr key={t.id}>
                   <td>{t.name}</td>
-                  {locations.map((l) => {
-                    const c = t.capabilities[l] || {};
-                    return [
-                      <td key={l + "p"}>
-                        <input
-                          type="checkbox"
-                          checked={!!c.can_picking}
-                          onChange={(e) => setCap(t, l, "can_picking", e.target.checked)}
-                        />
-                      </td>,
-                      <td key={l + "r"}>
-                        <input
-                          type="checkbox"
-                          checked={!!c.can_reserve}
-                          onChange={(e) => setCap(t, l, "can_reserve", e.target.checked)}
-                        />
-                      </td>,
-                    ];
-                  })}
+                  <td>
+                    <MultiSelect
+                      options={locations.map((l) => ({ value: l, label: l }))}
+                      value={t.locations}
+                      onChange={(v) => setCap(t, { locations: v })}
+                    />
+                  </td>
+                  <td>
+                    <MultiSelect
+                      options={[
+                        { value: "PICKING", label: "Picking" },
+                        { value: "RESERVE", label: "Reserve" },
+                      ]}
+                      value={t.types}
+                      onChange={(v) => setCap(t, { types: v })}
+                    />
+                  </td>
                   <td>
                     <button className="btn btn-secondary btn-sm" onClick={() => removeTeam(t)}>
                       Remove
@@ -239,7 +196,7 @@ function TeamsPage() {
               ))}
               {teams.length === 0 && (
                 <tr>
-                  <td colSpan={2 + locations.length * 2} style={{ color: "#888" }}>
+                  <td colSpan={4} style={{ color: "#888" }}>
                     No teams yet — create Team01–Team58 above.
                   </td>
                 </tr>

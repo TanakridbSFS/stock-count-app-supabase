@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { useRouter } from "next/router";
 import Link from "next/link";
 import AdminGate from "../../components/AdminGate";
-import { postJson } from "../../lib/adminUpload";
+import { canTeamCount } from "../../lib/capabilities";
 
 function PiDocsPage() {
   const router = useRouter();
@@ -11,6 +11,7 @@ function PiDocsPage() {
   const [selected, setSelected] = useState(new Set());
   const [teamId, setTeamId] = useState("");
   const [filter, setFilter] = useState("ALL"); // ALL | UNASSIGNED
+  const [areaFilter, setAreaFilter] = useState("ALL");
   const [error, setError] = useState("");
   const [msg, setMsg] = useState("");
 
@@ -30,24 +31,12 @@ function PiDocsPage() {
     setError("");
     setMsg("");
     try {
-      let res = await fetch("/api/admin/pidocs", {
+      const res = await fetch("/api/admin/pidocs", {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ piDocIds: ids, teamId: team || null }),
       });
-      let json = await res.json();
-      if (res.status === 409 && json.capabilityMismatch) {
-        const ok = confirm(
-          `This team isn't flagged for:\n\n${json.mismatches.slice(0, 15).join("\n")}${json.mismatches.length > 15 ? "\n…" : ""}\n\nAssign anyway?`
-        );
-        if (!ok) return;
-        res = await fetch("/api/admin/pidocs", {
-          method: "PATCH",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ piDocIds: ids, teamId: team || null, force: true }),
-        });
-        json = await res.json();
-      }
+      const json = await res.json();
       if (!res.ok) throw new Error(json.error || "Failed");
       setMsg(`Updated ${json.updated} PI Doc(s).`);
       setSelected(new Set());
@@ -57,7 +46,19 @@ function PiDocsPage() {
     }
   }
 
-  const docs = (data?.piDocs || []).filter((d) => filter === "ALL" || !d.assigned_team_id);
+  const areas = [...new Set((data?.piDocs || []).map((d) => d.warehouse_area_code))].sort();
+  const docs = (data?.piDocs || []).filter(
+    (d) =>
+      (filter === "ALL" || !d.assigned_team_id) && (areaFilter === "ALL" || d.warehouse_area_code === areaFilter)
+  );
+  // COUNT lane: only teams allowed to count every selected PI Doc can be picked.
+  const selectedDocs = (data?.piDocs || []).filter((d) => selected.has(d.id));
+  const restricted = data?.round.lane === "COUNT";
+  const eligible = (t) =>
+    !restricted ||
+    selectedDocs.every((d) =>
+      canTeamCount({ sap_storage_locations: t.locations, area_types: t.types }, d)
+    );
   const allSelected = docs.length > 0 && docs.every((d) => selected.has(d.id));
   const toggle = (id) =>
     setSelected((s) => {
@@ -89,8 +90,26 @@ function PiDocsPage() {
               <select value={teamId} onChange={(e) => setTeamId(e.target.value)}>
                 <option value="">— unassign —</option>
                 {data.teams.map((t) => (
-                  <option key={t.id} value={t.id}>
+                  <option key={t.id} value={t.id} disabled={!eligible(t)}>
                     {t.name}
+                    {t.locations.length ? ` (${t.locations.join(",")} | ${t.types.join(",").toLowerCase()})` : ""}
+                    {eligible(t) ? "" : " — not allowed"}
+                  </option>
+                ))}
+              </select>
+              {restricted && (
+                <div style={{ fontSize: 12, color: "#6b7280" }}>
+                  Count round: only teams allowed to count the selected Warehouse Area(s) can be chosen.
+                </div>
+              )}
+            </div>
+            <div className="field">
+              <label>Warehouse Area</label>
+              <select value={areaFilter} onChange={(e) => setAreaFilter(e.target.value)}>
+                <option value="ALL">All areas</option>
+                {areas.map((a) => (
+                  <option key={a} value={a}>
+                    {a}
                   </option>
                 ))}
               </select>
@@ -122,8 +141,7 @@ function PiDocsPage() {
                   />
                 </th>
                 <th>PI Doc</th>
-                <th>Storage</th>
-                <th>Type</th>
+                <th>Warehouse Area</th>
                 <th>First bin</th>
                 <th className="num">Bins</th>
                 <th>Counted</th>
@@ -137,8 +155,7 @@ function PiDocsPage() {
                     <input type="checkbox" checked={selected.has(d.id)} onChange={() => toggle(d.id)} />
                   </td>
                   <td style={{ fontFamily: "monospace" }}>{d.pi_doc_no}</td>
-                  <td>{d.sap_storage_location}</td>
-                  <td>{d.zone_type}</td>
+                  <td>{d.warehouse_area_code}</td>
                   <td>{d.firstBin}</td>
                   <td className="num">{d.binCount}</td>
                   <td>
@@ -149,7 +166,7 @@ function PiDocsPage() {
               ))}
               {docs.length === 0 && (
                 <tr>
-                  <td colSpan={8} style={{ color: "#888" }}>
+                  <td colSpan={7} style={{ color: "#888" }}>
                     Nothing to show.
                   </td>
                 </tr>

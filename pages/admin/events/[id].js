@@ -26,7 +26,7 @@ function EventPage() {
       return;
     }
     setData(json);
-    setTags(Object.fromEntries(json.areas.map((a) => [a.area, a.classification || ""])));
+    setTags(Object.fromEntries(json.areas.map((a) => [a.area, a.classification || a.defaultTag || ""])));
   }
 
   useEffect(() => {

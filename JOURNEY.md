@@ -46,3 +46,12 @@ First reference for any session. Append a dated entry after each stage.
 ## Next
 - User: run migration 002, create Teams, create an event, tag areas, Count#1 upload, assign, activate, then try a PDA.
 - Decide whether to port `/dashboard` and `/count-result` to rounds.
+
+## 2026-10-04 — Reset, area defaults, team capabilities v2, PDA bin list, tabbed Admin Console
+1. Wiped Supabase: events (cascade), master files, bin_master_raw, old count_runs, team_capabilities. Kept `teams` (58) and `area_classification_defaults`.
+2. `003_area_classification_defaults.sql` (applied): standing COUNT / PRECOUNT / EXCLUDED tag per Warehouse Area. Event page pre-fills untagged areas from it; editable at `/admin/area-defaults`.
+3. `004` was applied as a per-area draft; `005_team_capabilities_two_dimensions.sql` replaces it: `team_capabilities(team_id PK, sap_storage_locations[], area_types[])`. Permanent per team, cross product (Team01 | F001,C001 | Picking,Reserve). Enforced only in the COUNT lane, only for Picking/Reserve areas (area type = suffix of the Warehouse Area name); Pre-Count and Blocked/Sample areas are never restricted. Checked at assignment (409, no override) and again on the PDA (`lib/pda.js`).
+4. `pi_docs.warehouse_area_code`: PI Docs (auto-gen and Count#1 file) never mix Warehouse Areas; Admin sees the area when assigning. Removed the old filter that skipped zone_type OTHER bins (it would have emptied Pre-Count, whose areas are all OTHER).
+5. PDA: `/scan` lists the PI Doc's bins with Counted / Not counted; `/join` shows the area and a Done mark.
+6. Admin Console redesigned into tabs: System Setting (one-time), Count Round Setting (per stocktake), Monitor & Report. Old Runs/Export cards removed.
+7. `next build` OK. **Run migration 005 before using Teams / Assign.** Not yet exercised end-to-end against the live DB.

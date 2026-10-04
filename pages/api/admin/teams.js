@@ -1,11 +1,13 @@
 import { withAdmin } from "../../../lib/adminAuth";
-import { db, fetchAll } from "../../../lib/stocktake";
+import { db } from "../../../lib/stocktake";
+import { AREA_TYPES, areaTypeOf } from "../../../lib/capabilities";
 
-// Team master + per-storage-location Picking/Reserve capability flags.
-//   GET    -> { teams: [{ id, name, active, capabilities: { F001: { can_picking, can_reserve } } }], storageLocations: [...] }
+// Team master + permanent capabilities (COUNT lane only). A team may count
+// the cross product of its storage locations x its types (Picking / Reserve).
+//   GET    -> { teams: [{ id, name, active, locations: ["F001"], types: ["PICKING"] }], storageLocations: [...] }
 //   POST   { action: "add", name }                      add one team (TeamNN)
 //   POST   { action: "bulk", from, to }                 add Team<from>..Team<to> (skips existing)
-//   PATCH  { teamId, storageLocation, can_picking, can_reserve }   upsert one capability
+//   PATCH  { teamId, locations: [...], types: [...] }   replace the team's capability
 //   DELETE ?id=...                                      remove a team (refused if it has PI Docs)
 const TEAM_NAME = /^Team\d{2,3}$/;
 
@@ -22,23 +24,26 @@ async function handler(req, res) {
       const { data: caps, error: capErr } = await supabase.from("team_capabilities").select("*");
       if (capErr) throw capErr;
 
-      // Known storage locations: from every uploaded bin location master,
-      // plus any already used in a capability row.
-      const locRows = await fetchAll(() =>
-        supabase.from("bin_locations").select("sap_storage_location").order("id")
+      // Selectable storage locations: those of the COUNT-lane default areas
+      // that are Picking / Reserve, plus anything already used by a team.
+      const { data: defs, error: defErr } = await supabase
+        .from("area_classification_defaults")
+        .select("sap_storage_location, warehouse_area_code, classification");
+      if (defErr) throw defErr;
+      const locs = new Set(
+        defs
+          .filter((d) => d.classification === "COUNT" && areaTypeOf(d.warehouse_area_code) !== "OTHER")
+          .map((d) => d.sap_storage_location)
       );
-      const locs = new Set(locRows.map((r) => r.sap_storage_location));
-      caps.forEach((c) => locs.add(c.sap_storage_location));
+      caps.forEach((c) => c.sap_storage_locations.forEach((l) => locs.add(l)));
 
-      const capsByTeam = {};
-      for (const c of caps) {
-        (capsByTeam[c.team_id] ||= {})[c.sap_storage_location] = {
-          can_picking: c.can_picking,
-          can_reserve: c.can_reserve,
-        };
-      }
+      const capByTeam = Object.fromEntries(caps.map((c) => [c.team_id, c]));
       return res.status(200).json({
-        teams: teams.map((t) => ({ ...t, capabilities: capsByTeam[t.id] || {} })),
+        teams: teams.map((t) => ({
+          ...t,
+          locations: capByTeam[t.id]?.sap_storage_locations || [],
+          types: capByTeam[t.id]?.area_types || [],
+        })),
         storageLocations: Array.from(locs).sort(),
       });
     }
@@ -75,18 +80,21 @@ async function handler(req, res) {
     }
 
     if (req.method === "PATCH") {
-      const { teamId, storageLocation, can_picking, can_reserve } = req.body || {};
-      if (!teamId || !storageLocation) {
-        return res.status(400).json({ error: "Missing teamId or storageLocation" });
+      const { teamId, locations, types } = req.body || {};
+      if (!teamId || !Array.isArray(locations) || !Array.isArray(types)) {
+        return res.status(400).json({ error: "Missing teamId, locations or types" });
+      }
+      if (types.some((t) => !AREA_TYPES.includes(t))) {
+        return res.status(400).json({ error: "Type must be PICKING or RESERVE" });
       }
       const { error } = await supabase.from("team_capabilities").upsert(
         {
           team_id: teamId,
-          sap_storage_location: storageLocation,
-          can_picking: !!can_picking,
-          can_reserve: !!can_reserve,
+          sap_storage_locations: [...new Set(locations.map((l) => String(l).trim()).filter(Boolean))],
+          area_types: [...new Set(types)],
+          updated_at: new Date().toISOString(),
         },
-        { onConflict: "team_id,sap_storage_location" }
+        { onConflict: "team_id" }
       );
       if (error) throw error;
       return res.status(200).json({ ok: true });

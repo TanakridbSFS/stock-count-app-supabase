@@ -1,78 +1,37 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
-import QRCode from "qrcode";
+import { useRouter } from "next/router";
 import AdminGate from "../../components/AdminGate";
 
+const TABS = [
+  { key: "system", label: "System Setting" },
+  { key: "round", label: "Count Round Setting" },
+  { key: "monitor", label: "Monitor & Report" },
+];
+
+function Item({ href, title, children }) {
+  return (
+    <Link href={href} className="card" style={{ display: "block", textDecoration: "none", color: "inherit" }}>
+      <div className="card-title">{title} →</div>
+      <div className="card-subtext" style={{ marginBottom: 0 }}>
+        {children}
+      </div>
+    </Link>
+  );
+}
+
 function AdminConsole() {
-  const [runs, setRuns] = useState([]);
-  const [selectedRunId, setSelectedRunId] = useState("");
+  const router = useRouter();
+  const [tab, setTab] = useState("round");
 
-  const [dates, setDates] = useState([]);
-  const [selectedDate, setSelectedDate] = useState("ALL");
-  const [loadingDates, setLoadingDates] = useState(false);
-
-  const [qrModal, setQrModal] = useState(null); // { runName, code, dataUrl }
-  const [progressByRunId, setProgressByRunId] = useState({});
-
-  async function showQrCode(run) {
-    const dataUrl = await QRCode.toDataURL(run.barcode_code, { width: 320, margin: 2 });
-    setQrModal({ runName: run.run_name, code: run.barcode_code, dataUrl });
-  }
-
-  async function loadProgress(list) {
-    const entries = await Promise.all(
-      list.map(async (r) => {
-        try {
-          const res = await fetch(`/api/admin/progress?runId=${encodeURIComponent(r.id)}`);
-          const json = await res.json();
-          return [r.id, json];
-        } catch {
-          return [r.id, null];
-        }
-      })
-    );
-    setProgressByRunId(Object.fromEntries(entries));
-  }
-
-  async function loadRuns() {
-    try {
-      const res = await fetch("/api/admin/runs");
-      const json = await res.json();
-      const list = json.runs || [];
-      setRuns(list);
-      if (list.length > 0) setSelectedRunId((prev) => prev || list[0].id);
-      loadProgress(list);
-    } catch {
-      // non-fatal
-    }
-  }
-
-  async function loadDates(runId) {
-    if (!runId) return;
-    setLoadingDates(true);
-    try {
-      const res = await fetch(`/api/admin/dates?runId=${encodeURIComponent(runId)}`);
-      const json = await res.json();
-      setDates(json.dates || []);
-    } catch {
-      // non-fatal
-    } finally {
-      setLoadingDates(false);
-    }
-  }
-
+  // Remember the tab in the URL (?tab=system) so Back returns to the same tab.
   useEffect(() => {
-    loadRuns();
-  }, []);
+    if (router.isReady && TABS.some((t) => t.key === router.query.tab)) setTab(router.query.tab);
+  }, [router.isReady, router.query.tab]);
 
-  useEffect(() => {
-    setSelectedDate("ALL");
-    loadDates(selectedRunId);
-  }, [selectedRunId]);
-
-  function handleExport() {
-    const params = new URLSearchParams({ runId: selectedRunId, date: selectedDate });
-    window.location.href = `/api/admin/export?${params}`;
+  function pick(key) {
+    setTab(key);
+    router.replace({ pathname: "/admin", query: { tab: key } }, undefined, { shallow: true });
   }
 
   return (
@@ -80,134 +39,67 @@ function AdminConsole() {
       <div className="admin-header">
         <div className="title">Admin Console</div>
         <nav className="admin-nav">
-          <Link href="/scan">Go to counting app →</Link>
-          <Link href="/dashboard">Live 3D Warehouse Dashboard</Link>
-          <Link href="/admin/events">Stocktake Events</Link>
-          <Link href="/admin/teams">Teams</Link>
-          <Link href="/admin/control">Control (Rounds)</Link>
-          <Link href="/admin/progress">Progress</Link>
-          <Link href="/admin/report">Consolidated Report</Link>
+          <Link href="/">Go to counting app →</Link>
         </nav>
       </div>
 
-      <div className="admin-grid">
-        <div className="card">
-          <div className="card-title">Export Count Records</div>
-          <div className="card-subtext">
-            Downloads the raw CountRecord log as a CSV file for the selected
-            Run — every MATCH / ADJUSTED / NEW / ZERO / EMPTY line saved so
-            far, for the date you pick (or everything).
-          </div>
-
-          <div className="field-row">
-            <div className="field">
-              <label>Run</label>
-              <select value={selectedRunId} onChange={(e) => setSelectedRunId(e.target.value)}>
-                {runs.map((r) => (
-                  <option key={r.id} value={r.id}>
-                    {r.run_name} ({r.status})
-                  </option>
-                ))}
-              </select>
-            </div>
-
-            <div className="field">
-              <label>Date</label>
-              <select value={selectedDate} onChange={(e) => setSelectedDate(e.target.value)}>
-                <option value="ALL">All dates</option>
-                {dates.map((d) => (
-                  <option key={d.date} value={d.date}>
-                    {d.date} ({d.rowCount} rows)
-                  </option>
-                ))}
-              </select>
-            </div>
-          </div>
-
-          <div>
-            <button className="btn btn-secondary btn-sm" disabled={loadingDates} onClick={() => loadDates(selectedRunId)}>
-              {loadingDates ? "Loading…" : "Refresh date list"}
-            </button>
-            <button className="btn btn-primary btn-sm" disabled={!selectedRunId} onClick={handleExport}>
-              Download CSV
-            </button>
-          </div>
-        </div>
-
-        <div className="card">
-          <div className="card-title">Runs</div>
-          <div className="card-subtext">
-            {runs.length} run{runs.length === 1 ? "" : "s"} on file. Create or
-            manage runs from Run Setup.
-          </div>
-          <table className="admin-table">
-            <thead>
-              <tr>
-                <th>Run Name</th>
-                <th>Run ID</th>
-                <th>Status</th>
-                <th>Bins Counted</th>
-                <th></th>
-              </tr>
-            </thead>
-            <tbody>
-              {runs.map((r) => {
-                const p = progressByRunId[r.id];
-                return (
-                  <tr key={r.id}>
-                    <td>{r.run_name}</td>
-                    <td style={{ fontFamily: "monospace" }}>{r.barcode_code}</td>
-                    <td>{r.status}</td>
-                    <td>{p ? `${p.binsCounted}/${p.binsTotal}` : "…"}</td>
-                    <td>
-                      <button className="btn btn-secondary btn-sm" onClick={() => showQrCode(r)}>
-                        QR Code
-                      </button>
-                    </td>
-                  </tr>
-                );
-              })}
-              {runs.length === 0 && (
-                <tr>
-                  <td colSpan={5} style={{ color: "#888" }}>
-                    No runs yet.
-                  </td>
-                </tr>
-              )}
-            </tbody>
-          </table>
-        </div>
+      <div className="admin-tabs">
+        {TABS.map((t) => (
+          <button key={t.key} className={`admin-tab ${tab === t.key ? "active" : ""}`} onClick={() => pick(t.key)}>
+            {t.label}
+          </button>
+        ))}
       </div>
 
-      {qrModal && (
-        <div
-          onClick={() => setQrModal(null)}
-          style={{
-            position: "fixed",
-            inset: 0,
-            background: "rgba(0,0,0,0.5)",
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "center",
-            zIndex: 1000,
-          }}
-        >
-          <div
-            onClick={(e) => e.stopPropagation()}
-            style={{ background: "#fff", borderRadius: 10, padding: 24, textAlign: "center" }}
-          >
-            <div style={{ fontWeight: 700, marginBottom: 8 }}>{qrModal.runName}</div>
-            <img src={qrModal.dataUrl} alt="Run QR code" style={{ width: 260, height: 260 }} />
-            <div style={{ fontFamily: "monospace", fontSize: 16, marginTop: 8 }}>{qrModal.code}</div>
-            <button
-              className="btn btn-secondary btn-sm"
-              style={{ marginTop: 14 }}
-              onClick={() => setQrModal(null)}
-            >
-              Close
-            </button>
+      {tab === "system" && (
+        <>
+          <div className="card-subtext">
+            One-time setup. Set these once; they are reused by every Stocktake Event.
           </div>
-        </div>
+          <div className="admin-grid">
+            <Item href="/admin/teams" title="Teams & capabilities">
+              Create Team01–Team58, set which Storage Locations and Picking/Reserve each team may count (Count rounds
+              only), and print the Team QR codes used to log in on the PDA.
+            </Item>
+            <Item href="/admin/area-defaults" title="Warehouse Area default tags">
+              The standing COUNT / PRECOUNT / EXCLUDED tag of each Warehouse Area. New events start from these.
+            </Item>
+          </div>
+        </>
+      )}
+
+      {tab === "round" && (
+        <>
+          <div className="card-subtext">Done for every stocktake — follow the steps in order.</div>
+          <div className="admin-grid">
+            <Item href="/admin/events" title="1 · Stocktake Event & area tags">
+              Create the event from the Stock export and the Bin Location Master, then check the tag of each Warehouse
+              Area (pre-filled from the defaults).
+            </Item>
+            <Item href="/admin/control" title="2 · Rounds (Pre-Count / Count)">
+              Create Pre-Count and Count rounds (Count#1 from the PI Doc file, Count#2+ from SKUs) and make one round per
+              lane Active.
+            </Item>
+            <Item href="/admin/control" title="3 · Assign PI Docs to teams">
+              Open a round's PI Docs, see the Warehouse Area of each, and assign them to teams allowed to count that
+              area.
+            </Item>
+          </div>
+        </>
+      )}
+
+      {tab === "monitor" && (
+        <>
+          <div className="card-subtext">Watch the count while it runs and export the result.</div>
+          <div className="admin-grid">
+            <Item href="/admin/progress" title="Progress">
+              Team × PI Doc completion for a round. Refreshes every minute.
+            </Item>
+            <Item href="/admin/report" title="Consolidated report">
+              Latest round wins per Bin + Mat + Batch, with a Pre-Count toggle and CSV download.
+            </Item>
+          </div>
+        </>
       )}
     </div>
   );

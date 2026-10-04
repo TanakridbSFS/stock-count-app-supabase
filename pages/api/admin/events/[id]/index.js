@@ -41,9 +41,20 @@ async function handler(req, res) {
     if (clsErr) throw clsErr;
     const tagByArea = Object.fromEntries(cls.map((c) => [c.warehouse_area_code, c.classification]));
 
+    // Standing defaults (area_classification_defaults) prefill untagged areas.
+    const { data: defs, error: defErr } = await supabase
+      .from("area_classification_defaults")
+      .select("warehouse_area_code, classification");
+    if (defErr) throw defErr;
+    const defaultByArea = Object.fromEntries(defs.map((d) => [d.warehouse_area_code, d.classification]));
+
     const areas = Array.from(byArea.values())
       .sort((a, b) => a.area.localeCompare(b.area))
-      .map((a) => ({ ...a, classification: tagByArea[a.area] || null }));
+      .map((a) => ({
+        ...a,
+        classification: tagByArea[a.area] || null,
+        defaultTag: defaultByArea[a.area] || null,
+      }));
 
     res.status(200).json({ event, binCount: bins.length, areas });
   } catch (err) {
