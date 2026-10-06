@@ -31,6 +31,13 @@ const digitsOnly = (v) => String(v).replace(/\D/g, "");
 
 const lineKeyOf = (mat, batch) => `${mat || ""}|${padBatch(batch)}`;
 
+// Type of a saved line from expected vs counted quantity.
+function typeOfQty(expected, counted) {
+  if (expected === null || expected === undefined || expected === "") return "NEW";
+  if (counted === 0) return "ZERO";
+  return Number(counted) === Number(expected) ? "MATCH" : "ADJUSTED";
+}
+
 // KG is the most error-prone unit to miscount by hand (small mistakes are
 // easy to miss on a scale reading) — highlight it wherever a UOM is shown
 // on the Confirm/Adjust screen so it stands out at a glance while scanning.
@@ -74,6 +81,7 @@ export default function CountBinPage() {
   const [newLines, setNewLines] = useState([]);
   const [saving, setSaving] = useState(false);
   const initialisedBin = useRef(null);
+  const [focusTab, setFocusTab] = useState("ALL"); // recount: which focus SKU is on screen
 
   // For a bin with no expected items in Master data — lets the counter
   // confirm "checked, nothing here" without having to fake a New Line.
@@ -117,7 +125,13 @@ export default function CountBinPage() {
           const k = lineKey(l);
           if (next[k]) continue;
           const rec = savedByKey.get(lineKeyOf(l.Mat, l.Batch));
-          if (rec && rec.lineType === "MATCH") {
+          if (json.recount && rec) {
+            // recount: saved = confirmed the earlier count, or a new actual
+            next[k] =
+              l.PrevQty !== null && Number(rec.countedQty) === Number(l.PrevQty)
+                ? { status: "correct", countedQty: "" }
+                : { status: "wrong_closed", countedQty: String(rec.countedQty) };
+          } else if (rec && rec.lineType === "MATCH") {
             next[k] = { status: "correct", countedQty: "" };
           } else if (rec && (rec.lineType === "ADJUSTED" || rec.lineType === "ZERO")) {
             next[k] = { status: "wrong_closed", countedQty: String(rec.countedQty) };
@@ -249,7 +263,14 @@ export default function CountBinPage() {
     for (const l of data.lines) {
       const k = lineKey(l);
       const e = edits[k] || { status: "unanswered", countedQty: "" };
-      if (e.status === "unanswered") continue; // not answered yet — leave for later
+      if (e.status === "unanswered") {
+        if (data.recount) {
+          // a recount is finished only when every focus line is answered
+          setError(`Please answer ${l.Mat} (${l.Batch}) — Correct or Wrong.`);
+          return null;
+        }
+        continue; // not answered yet — leave for later
+      }
       if (e.status === "wrong") {
         // Still open (not closed with "Confirm" yet) — not ready to save.
         setError(`Please finish ${l.Mat} (${l.Batch}) — enter a quantity and tap "Confirm", or use "No Product".`);
@@ -261,14 +282,23 @@ export default function CountBinPage() {
         setError(`Please enter a quantity for ${l.Mat} (${l.Batch}), or use "No Product" for 0.`);
         return null;
       }
-      const countedQty = e.status === "correct" ? l.Qty : Number(e.countedQty);
-      const lineType = e.status === "correct" ? "MATCH" : countedQty === 0 ? "ZERO" : "ADJUSTED";
+      // Count: "Correct" = the Master quantity is right. Recount: "Correct" = the
+      // earlier count is right, so that number is saved again for this round.
+      const countedQty =
+        e.status === "correct" ? (data.recount ? l.PrevQty : l.Qty) : Number(e.countedQty);
+      const lineType = data.recount
+        ? typeOfQty(l.Qty, countedQty)
+        : e.status === "correct"
+        ? "MATCH"
+        : countedQty === 0
+        ? "ZERO"
+        : "ADJUSTED";
       lines.push({
         mat: l.Mat,
         matName: l.MatName,
         batch: l.Batch,
         uom: l.UOM,
-        expectedQty: l.Qty,
+        expectedQty: l.Qty === null ? "" : l.Qty,
         countedQty,
         lineType,
       });
@@ -494,21 +524,74 @@ export default function CountBinPage() {
             </div>
           )}
 
-          {data?.lines.map((l) => {
+          {data?.recount && (
+            <div className="banner banner-info">
+              {data.roundLabel} — recount of the focus SKU{data.focusSkus.length === 1 ? "" : "s"} only. Check the
+              earlier count: <b>Correct</b> keeps it, <b>Wrong</b> lets you enter the new actual. Item not found? Enter 0.
+            </div>
+          )}
+          {data?.recount && data.focusSkus.length > 1 && (
+            <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 10 }}>
+              {["ALL", ...data.focusSkus].map((sku) => (
+                <button
+                  key={sku}
+                  className={`btn btn-sm ${focusTab === sku ? "btn-primary" : "btn-secondary"}`}
+                  onClick={() => setFocusTab(sku)}
+                >
+                  {sku === "ALL" ? "All SKUs" : sku}
+                </button>
+              ))}
+            </div>
+          )}
+          {data?.recount && data.lines.length === 0 && (
+            <div className="banner banner-warn">
+              No focus SKU of this round was found in this bin — add a new line if you find one.
+            </div>
+          )}
+
+          {data?.lines
+            .filter((l) => !data.recount || focusTab === "ALL" || String(l.Mat) === focusTab)
+            .map((l) => {
             const k = lineKey(l);
             const e = edits[k] || { status: "unanswered", countedQty: "" };
             return (
               <div className="card" key={k}>
                 <div className="card-row"><span>Mat</span><b>{l.Mat} — {l.MatName}</b></div>
                 <div className="card-row"><span>Batch</span><b>{l.Batch}</b></div>
-                <div className="card-row"><span>Expected Qty</span><b>{l.Qty} <UomText uom={l.UOM} /></b></div>
+                <div className="card-row">
+                  <span>Master Qty</span>
+                  <b>{l.Qty === null ? "— (not in Master)" : <>{l.Qty} <UomText uom={l.UOM} /></>}</b>
+                </div>
+                {data.recount && (
+                  <div className="card-row">
+                    <span>{l.PrevRound || "Earlier count"}</span>
+                    <b>
+                      {l.PrevQty === null || l.PrevQty === undefined ? (
+                        "not counted yet"
+                      ) : (
+                        <>
+                          {l.PrevQty} <UomText uom={l.UOM} />
+                          <span style={{ fontWeight: 400, fontSize: 12, color: "#667085" }}>
+                            {" "}
+                            · {l.PrevTeam}
+                            {l.PrevTime ? ` · ${String(l.PrevTime).slice(0, 16).replace("T", " ")}` : ""}
+                          </span>
+                        </>
+                      )}
+                    </b>
+                  </div>
+                )}
                 {l.ExpirationDate && (
                   <div className="card-row"><span>Exp. Date</span><b>{l.ExpirationDate}</b></div>
                 )}
 
                 {e.status === "unanswered" && (
                   <div style={{ marginTop: 10 }}>
-                    <button className="btn btn-correct btn-sm" onClick={() => markCorrect(k)}>
+                    <button
+                      className="btn btn-correct btn-sm"
+                      disabled={data.recount && (l.PrevQty === null || l.PrevQty === undefined)}
+                      onClick={() => markCorrect(k)}
+                    >
                       ✓ Correct
                     </button>
                     <button className="btn btn-wrong btn-sm" onClick={() => markWrong(k)}>
@@ -519,7 +602,9 @@ export default function CountBinPage() {
 
                 {e.status === "correct" && (
                   <div style={{ marginTop: 10 }}>
-                    <span className="badge badge-match">MATCH — {l.Qty} <UomText uom={l.UOM} /></span>{" "}
+                    <span className="badge badge-match">
+                      {data.recount ? "CONFIRMED" : "MATCH"} — {data.recount ? l.PrevQty : l.Qty} <UomText uom={l.UOM} />
+                    </span>{" "}
                     <button className="btn btn-secondary btn-sm" onClick={() => undoAnswer(k)}>
                       Edit
                     </button>

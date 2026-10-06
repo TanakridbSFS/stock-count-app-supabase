@@ -1,5 +1,7 @@
 import { withAdmin } from "../../../lib/adminAuth";
 import { db, fetchAll } from "../../../lib/stocktake";
+import { applyDefaultTags } from "../../../lib/areaTags";
+import { runAutoAssign } from "../../../lib/autoAssign";
 import {
   LANES,
   roundLabel,
@@ -18,6 +20,8 @@ export const config = { api: { bodyParser: { sizeLimit: "4mb" } } };
 // POST   { eventId, lane: "COUNT", piDocRows: [{location, piDoc}] }   Count#1 from the uploaded PI Doc file
 // POST   { eventId, lane: "COUNT", skus: ["..."] }             Count#2+ recount, PI Docs auto-generated
 // PATCH  { roundId, action: "activate" | "close" }
+// PATCH  { roundId, action: "auto_assign" }              one pass: every idle active team gets one PI Doc
+// PATCH  { roundId, action: "set_auto", auto: boolean }  toggle: keep idle teams supplied automatically
 // DELETE ?roundId=...   only a PENDING round that has no count records
 async function handler(req, res, admin) {
   const supabase = db();
@@ -55,6 +59,7 @@ async function handler(req, res, admin) {
       if (!eventId || !LANES.includes(lane)) {
         return res.status(400).json({ error: "Missing eventId or invalid lane" });
       }
+      await applyDefaultTags(eventId);
       await assertClassificationComplete(eventId);
 
       // ---- Pre-Count: every PRECOUNT-tagged bin, auto-generated ----
@@ -196,21 +201,47 @@ async function handler(req, res, admin) {
         );
         rows.forEach((r) => r.container_code && holding.add(r.container_code));
       }
-      const bins = [...holding].filter((b) => binInfo.has(b)).map((b) => binInfo.get(b));
+      // Bins where an earlier Count round found one of these SKUs (e.g. a NEW line the
+      // Master does not know about) are recounted too.
+      const { data: priorRounds, error: prErr } = await supabase
+        .from("count_rounds")
+        .select("id")
+        .eq("stocktake_event_id", eventId)
+        .eq("lane", "COUNT");
+      if (prErr) throw prErr;
+      const fromResults = new Set();
+      if (priorRounds.length) {
+        for (let i = 0; i < cleanSkus.length; i += 100) {
+          const part = cleanSkus.slice(i, i + 100);
+          const recs = await fetchAll(() =>
+            supabase
+              .from("count_records")
+              .select("bin")
+              .in("count_round_id", priorRounds.map((r) => r.id))
+              .in("mat", part)
+              .gt("counted_qty", 0)
+              .order("id")
+          );
+          recs.forEach((r) => fromResults.add(r.bin));
+        }
+      }
+      const allBins = new Set([...holding, ...fromResults]);
+      const bins = [...allBins].filter((b) => binInfo.has(b)).map((b) => binInfo.get(b));
       if (bins.length === 0) {
         return res.status(400).json({
-          error: "None of those SKUs is held in a COUNT-tagged bin according to the Bin Master.",
+          error: "None of those SKUs is held in a COUNT-tagged bin according to the Bin Master or the earlier counts.",
         });
       }
 
-      const round = await createRound({ eventId, lane, createdBy: admin.name });
+      const round = await createRound({ eventId, lane, createdBy: admin.name, skus: cleanSkus });
       try {
         const piDocCount = await autoGeneratePiDocs(round, bins);
         return res.status(200).json({
           round,
           piDocCount,
           binCount: bins.length,
-          skippedBinCount: holding.size - bins.length,
+          skippedBinCount: allBins.size - bins.length,
+          fromEarlierCounts: [...fromResults].filter((b) => !holding.has(b) && binInfo.has(b)).length,
         });
       } catch (e) {
         await deleteRound(round.id);
@@ -237,7 +268,29 @@ async function handler(req, res, admin) {
         if (closeErr) throw closeErr;
         const { error: actErr } = await supabase.from("count_rounds").update({ status: "ACTIVE" }).eq("id", round.id);
         if (actErr) throw actErr;
-        return res.status(200).json({ ok: true });
+        // toggle ON: hand the first PI Docs to the idle teams right away
+        let assigned = [];
+        if (round.auto_assign) assigned = await runAutoAssign(round.stocktake_event_id, { onlyAutoRounds: true });
+        return res.status(200).json({ ok: true, assigned: assigned.length });
+      }
+      if (action === "auto_assign") {
+        const assigned = await runAutoAssign(round.stocktake_event_id, { roundId: round.id });
+        return res.status(200).json({ ok: true, assigned });
+      }
+      if (action === "set_auto") {
+        const auto = !!req.body.auto;
+        const { error: autoErr } = await supabase.from("count_rounds").update({ auto_assign: auto }).eq("id", round.id);
+        if (autoErr) {
+          if (String(autoErr.message).includes("auto_assign")) {
+            return res.status(409).json({
+              needsMigration: true,
+              error: "Run migrations/006_auto_assign_and_recount_skus.sql in the Supabase SQL Editor first.",
+            });
+          }
+          throw autoErr;
+        }
+        const assigned = auto ? await runAutoAssign(round.stocktake_event_id, { onlyAutoRounds: true }) : [];
+        return res.status(200).json({ ok: true, auto, assigned: assigned.length });
       }
       if (action === "close") {
         const { error: clErr } = await supabase.from("count_rounds").update({ status: "CLOSED" }).eq("id", round.id);

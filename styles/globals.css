@@ -286,3 +286,10 @@ button {
 }
 .admin-tab.active { color: #1d4ed8; border-bottom-color: #1d4ed8; }
 .step-list { margin: 8px 0 0 18px; padding: 0; line-height: 1.7; }
+
+/* Control page: two lanes side by side only when each has room for its buttons */
+.admin-grid.lanes { grid-template-columns: repeat(auto-fit, minmax(560px, 1fr)); }
+.admin-grid.lanes .card { min-width: 0; overflow-x: auto; }
+@media (max-width: 860px) {
+  .admin-grid.lanes { grid-template-columns: 1fr; }
+}

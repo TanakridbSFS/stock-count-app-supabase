@@ -70,6 +70,25 @@ function TeamsPage() {
     run(() => postJson("/api/admin/teams", "PATCH", { teamId: team.id, ...next }));
   }
 
+  // Present / absent today. Inactive teams cannot log in on a PDA and get no auto-assigned work.
+  function setActive(team, active) {
+    setTeams((ts) => ts.map((t) => (t.id === team.id ? { ...t, active } : t)));
+    run(async () => {
+      const j = await postJson("/api/admin/teams", "PATCH", { teamId: team.id, active });
+      if (!active && j.released) setMsg(`${team.name} is inactive — ${j.released} PI Doc(s) not yet started went back to the pool.`);
+    });
+  }
+
+  function setAllActive(active) {
+    if (!confirm(`Set all ${teams.length} teams ${active ? "ACTIVE" : "INACTIVE"}?`)) return;
+    run(async () => {
+      for (const t of teams.filter((x) => x.active !== active)) {
+        await postJson("/api/admin/teams", "PATCH", { teamId: t.id, active });
+      }
+      await load();
+    });
+  }
+
   async function openQrs() {
     const list = await Promise.all(
       teams.map(async (t) => ({
@@ -149,18 +168,30 @@ function TeamsPage() {
       </div>
 
       <div className="card" style={{ marginTop: 20 }}>
-        <div className="card-title">Capabilities ({teams.length} teams)</div>
+        <div className="card-title">
+          Teams &amp; capabilities ({teams.filter((t) => t.active).length} active of {teams.length})
+        </div>
+        <div style={{ marginBottom: 8 }}>
+          <button className="btn btn-secondary btn-sm" onClick={() => setAllActive(true)}>
+            All active
+          </button>
+          <button className="btn btn-secondary btn-sm" onClick={() => setAllActive(false)}>
+            All inactive
+          </button>
+        </div>
         <div className="card-subtext">
           Count rounds only. A team may count every combination of its Storage
           Locations × Types — e.g. <b>Team01 | F001, C001 | Picking, Reserve</b>{" "}
           means F001 Picking, F001 Reserve, C001 Picking and C001 Reserve.
-          Pre-Count is never restricted. Changes save immediately.
+          Pre-Count is never restricted. <b>Active</b> = present today: an inactive team cannot log in on a PDA
+          and receives no auto-assigned work. Changes save immediately.
         </div>
         <div className="table-scroll" style={{ minHeight: 260 }}>
           <table className="admin-table cap-table">
             <thead>
               <tr>
                 <th>Team</th>
+                <th>Active</th>
                 <th>Storage Location</th>
                 <th>Picking / Reserve</th>
                 <th></th>
@@ -169,7 +200,10 @@ function TeamsPage() {
             <tbody>
               {teams.map((t) => (
                 <tr key={t.id}>
-                  <td>{t.name}</td>
+                  <td style={t.active ? undefined : { color: "#999" }}>{t.name}</td>
+                  <td>
+                    <input type="checkbox" checked={!!t.active} onChange={(e) => setActive(t, e.target.checked)} />
+                  </td>
                   <td>
                     <MultiSelect
                       options={locations.map((l) => ({ value: l, label: l }))}
@@ -196,7 +230,7 @@ function TeamsPage() {
               ))}
               {teams.length === 0 && (
                 <tr>
-                  <td colSpan={4} style={{ color: "#888" }}>
+                  <td colSpan={5} style={{ color: "#888" }}>
                     No teams yet — create Team01–Team58 above.
                   </td>
                 </tr>

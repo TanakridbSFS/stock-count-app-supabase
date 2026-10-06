@@ -93,12 +93,6 @@ export default function StartPage() {
       )}
 
       <div style={{ marginTop: 32, display: "flex", flexDirection: "column", gap: 10 }}>
-        <Link href="/dashboard" className="btn btn-secondary" style={{ textAlign: "center", textDecoration: "none" }}>
-          Live 3D Warehouse Dashboard
-        </Link>
-        <Link href="/count-result" className="btn btn-secondary" style={{ textAlign: "center", textDecoration: "none" }}>
-          Count Result
-        </Link>
         <Link href="/admin" className="btn btn-secondary" style={{ textAlign: "center", textDecoration: "none" }}>
           Admin Console
         </Link>

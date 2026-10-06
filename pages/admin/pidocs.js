@@ -3,6 +3,7 @@ import { useRouter } from "next/router";
 import Link from "next/link";
 import AdminGate from "../../components/AdminGate";
 import { canTeamCount } from "../../lib/capabilities";
+import { postJson } from "../../lib/adminUpload";
 
 function PiDocsPage() {
   const router = useRouter();
@@ -47,6 +48,41 @@ function PiDocsPage() {
   }
 
   const areas = [...new Set((data?.piDocs || []).map((d) => d.warehouse_area_code))].sort();
+  // Team of a single row: dropdown limited to the teams that may count the PI Doc.
+  async function assignOne(doc, team) {
+    await assign([doc.id], team);
+  }
+
+  async function autoAssignNow() {
+    setError("");
+    setMsg("");
+    try {
+      const j = await postJson("/api/admin/rounds", "PATCH", { roundId, action: "auto_assign" });
+      setMsg(
+        j.assigned.length
+          ? `Auto-assigned ${j.assigned.length} PI Doc(s): ` +
+              j.assigned.slice(0, 8).map((a) => `${a.teamName} ← ${a.piDocNo}`).join(", ") +
+              (j.assigned.length > 8 ? "…" : "")
+          : "Nothing to assign: every active team already has an unfinished PI Doc, or no PI Doc is left for them."
+      );
+      await load();
+    } catch (e) {
+      setError(e.message);
+    }
+  }
+
+  async function toggleAuto(on) {
+    setError("");
+    setMsg("");
+    try {
+      const j = await postJson("/api/admin/rounds", "PATCH", { roundId, action: "set_auto", auto: on });
+      setMsg(on ? `Auto-assign is ON — ${j.assigned} idle team(s) received a PI Doc.` : "Auto-assign is OFF.");
+      await load();
+    } catch (e) {
+      setError(e.message);
+    }
+  }
+
   const docs = (data?.piDocs || []).filter(
     (d) =>
       (filter === "ALL" || !d.assigned_team_id) && (areaFilter === "ALL" || d.warehouse_area_code === areaFilter)
@@ -130,6 +166,24 @@ function PiDocsPage() {
             Apply to {selected.size} PI Doc(s)
           </button>
 
+          <div style={{ display: "flex", gap: 16, alignItems: "center", flexWrap: "wrap", marginTop: 14 }}>
+            <button className="btn btn-secondary btn-sm" disabled={data.round.status === "CLOSED"} onClick={autoAssignNow}>
+              Auto assign now
+            </button>
+            <label style={{ display: "flex", alignItems: "center", gap: 8, cursor: "pointer" }}>
+              <input
+                type="checkbox"
+                checked={!!data.round.auto_assign}
+                disabled={data.round.status === "CLOSED"}
+                onChange={(e) => toggleAuto(e.target.checked)}
+              />
+              <b>Auto-Assign {data.round.auto_assign ? "ON" : "OFF"}</b>
+              <span style={{ fontSize: 13, color: "#667085" }}>
+                every active team with no unfinished PI Doc gets the next one automatically
+              </span>
+            </label>
+          </div>
+
           <table className="admin-table" style={{ marginTop: 14 }}>
             <thead>
               <tr>
@@ -142,7 +196,6 @@ function PiDocsPage() {
                 </th>
                 <th>PI Doc</th>
                 <th>Warehouse Area</th>
-                <th>First bin</th>
                 <th className="num">Bins</th>
                 <th>Counted</th>
                 <th>Team</th>
@@ -156,17 +209,35 @@ function PiDocsPage() {
                   </td>
                   <td style={{ fontFamily: "monospace" }}>{d.pi_doc_no}</td>
                   <td>{d.warehouse_area_code}</td>
-                  <td>{d.firstBin}</td>
                   <td className="num">{d.binCount}</td>
                   <td>
                     {d.binsCounted}/{d.binCount}
                   </td>
-                  <td>{d.teamName || <span style={{ color: "#b45309" }}>unassigned</span>}</td>
+                  <td>
+                    <select
+                      value={d.assigned_team_id || ""}
+                      disabled={data.round.status === "CLOSED"}
+                      onChange={(e) => assignOne(d, e.target.value)}
+                      style={{ minWidth: 150, color: d.assigned_team_id ? undefined : "#b45309" }}
+                    >
+                      <option value="">unassigned</option>
+                      {data.teams
+                        .filter((t) => t.id === d.assigned_team_id || canTeamCount({ sap_storage_locations: t.locations, area_types: t.types }, d) || !restricted)
+                        .map((t) => (
+                          <option key={t.id} value={t.id}>
+                            {t.name}
+                          </option>
+                        ))}
+                      {d.assigned_team_id && !data.teams.some((t) => t.id === d.assigned_team_id) && (
+                        <option value={d.assigned_team_id}>{d.teamName || "inactive team"}</option>
+                      )}
+                    </select>
+                  </td>
                 </tr>
               ))}
               {docs.length === 0 && (
                 <tr>
-                  <td colSpan={7} style={{ color: "#888" }}>
+                  <td colSpan={6} style={{ color: "#888" }}>
                     Nothing to show.
                   </td>
                 </tr>

@@ -1,10 +1,13 @@
 import { useEffect, useRef, useState } from "react";
+import Link from "next/link";
+import AdminGate from "../components/AdminGate";
 
-// Live 3D warehouse dashboard — every Bin in the Frozen zone (all 9 racks,
-// FA through FJ). Renders each bin as a cube positioned by its real
-// depth/side/level/rack (see pages/api/dashboard/bins.js + lib/
-// warehouseLayout.json for how the layout is built), colored by its most
-// recent count status, and polls for updates so it stays "live" on screen.
+// Live 3D warehouse dashboard (Admin Console > Monitor & Report) — the Frozen
+// room only (racks FA through FJ). Renders each bin as a cube positioned by its
+// real depth/side/level/rack (see pages/api/dashboard/bins.js + lib/
+// warehouseLayout.json), colored by its count status in the round picked at the
+// top (Pre-Count or Count of an event), and polls so it stays "live" on screen.
+// Bins that are not in the picked round are drawn dark grey ("not in round").
 //
 // Coordinate mapping:
 //   depth (1..54)    -> X — position walking down the aisle
@@ -22,7 +25,17 @@ const STATUS_COLORS = {
   ZERO: 0xef4444,
   NEW: 0x3b82f6,
   EMPTY: 0x6366f1,
-  UNCOUNTED: 0x9ca3af,
+  UNCOUNTED: 0xe5e7eb,
+  NOT_IN_ROUND: 0x334155,
+};
+const STATUS_LABELS = {
+  MATCH: "Match",
+  ADJUSTED: "Differs (adjusted / zero)",
+  ZERO: "Zero",
+  NEW: "New item found",
+  EMPTY: "Empty bin confirmed",
+  UNCOUNTED: "In round, not counted yet",
+  NOT_IN_ROUND: "Not in this round",
 };
 
 const POLL_MS = 60000; // "auto every 1 minute" per request
@@ -49,7 +62,7 @@ function cellPosition(cell) {
   return { x, y, z, scaleY };
 }
 
-export default function WarehouseDashboard() {
+function WarehouseDashboard() {
   const mountRef = useRef(null);
   const stateRef = useRef({}); // holds three.js objects across renders without re-triggering React
   const [status, setStatus] = useState("loading"); // loading | ready | error
@@ -58,21 +71,37 @@ export default function WarehouseDashboard() {
   const [hover, setHover] = useState(null); // bin cell + status fields
   const [lastUpdated, setLastUpdated] = useState(null);
   const [refreshing, setRefreshing] = useState(false);
-  const [runs, setRuns] = useState([]);
-  const [runId, setRunId] = useState("");
+  const [events, setEvents] = useState([]);
+  const [eventId, setEventId] = useState("");
+  const [rounds, setRounds] = useState([]);
+  const [runId, setRunId] = useState(""); // the selected ROUND id
   const runIdRef = useRef("");
   runIdRef.current = runId;
 
   useEffect(() => {
-    fetch("/api/admin/runs")
+    fetch("/api/admin/events")
       .then((r) => r.json())
       .then((json) => {
-        const list = json.runs || [];
-        setRuns(list);
-        if (list.length > 0) setRunId((prev) => prev || list[0].id);
+        const list = json.events || [];
+        setEvents(list);
+        if (list.length > 0) setEventId((prev) => prev || list[0].id);
       })
       .catch(() => {});
   }, []);
+
+  useEffect(() => {
+    if (!eventId) return;
+    setRunId("");
+    fetch(`/api/admin/rounds?eventId=${encodeURIComponent(eventId)}`)
+      .then((r) => r.json())
+      .then((json) => {
+        const list = json.rounds || [];
+        setRounds(list);
+        const pick = list.find((r) => r.status === "ACTIVE") || list[list.length - 1];
+        if (pick) setRunId(pick.id);
+      })
+      .catch(() => {});
+  }, [eventId]);
 
   // ---- three.js scene setup (once) ----
   useEffect(() => {
@@ -192,7 +221,7 @@ export default function WarehouseDashboard() {
     async function load() {
       if (!runIdRef.current) return;
       try {
-        const res = await fetch(`/api/dashboard/bins?runId=${encodeURIComponent(runIdRef.current)}`);
+        const res = await fetch(`/api/dashboard/bins?roundId=${encodeURIComponent(runIdRef.current)}`);
         const json = await res.json();
         if (!res.ok) throw new Error(json.error || "Failed to load dashboard data");
         if (stopped) return;
@@ -279,7 +308,7 @@ export default function WarehouseDashboard() {
     if (!runId) return;
     setRefreshing(true);
     try {
-      const res = await fetch(`/api/dashboard/bins?runId=${encodeURIComponent(runId)}`);
+      const res = await fetch(`/api/dashboard/bins?roundId=${encodeURIComponent(runId)}`);
       const json = await res.json();
       if (!res.ok) throw new Error(json.error || "Failed to refresh");
       // Re-apply through the same path the poller uses, by faking a tiny
@@ -347,18 +376,30 @@ export default function WarehouseDashboard() {
         }}
       >
         <div style={{ fontWeight: 700, fontSize: 15, marginBottom: 4 }}>
-          Live Warehouse Dashboard — Frozen (FA–FJ)
+          Live Warehouse Dashboard — Frozen room only (FA–FJ)
         </div>
+        <Link href="/admin?tab=monitor" style={{ color: "#93c5fd", fontSize: 12 }}>
+          ← Admin Console
+        </Link>
         <div style={{ opacity: 0.8, marginBottom: 8 }}>
           Drag to rotate · Scroll to zoom · Right-drag to pan
         </div>
+        <select
+          value={eventId}
+          onChange={(e) => setEventId(e.target.value)}
+          style={{ margin: "8px 0 6px", width: "100%", padding: "4px 6px", fontSize: 12 }}
+        >
+          {events.map((ev) => (
+            <option key={ev.id} value={ev.id}>{ev.name}</option>
+          ))}
+        </select>
         <select
           value={runId}
           onChange={(e) => setRunId(e.target.value)}
           style={{ marginBottom: 8, width: "100%", padding: "4px 6px", fontSize: 12 }}
         >
-          {runs.map((r) => (
-            <option key={r.id} value={r.id}>{r.run_name}</option>
+          {rounds.map((r) => (
+            <option key={r.id} value={r.id}>{r.label} ({r.status})</option>
           ))}
         </select>
         <button
@@ -380,7 +421,9 @@ export default function WarehouseDashboard() {
         {status === "error" && <div style={{ color: "#f87171" }}>Error: {error}</div>}
         {counts && (
           <div>
-            <div style={{ marginBottom: 4 }}>Total bins: {counts.total}</div>
+            <div style={{ marginBottom: 4 }}>
+              Bins in this round: {counts.total - (counts.byStatus.NOT_IN_ROUND || 0)} of {counts.total} drawn
+            </div>
             {Object.entries(STATUS_COLORS).map(([k, hex]) => (
               <div key={k} style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 2 }}>
                 <span
@@ -392,7 +435,7 @@ export default function WarehouseDashboard() {
                     display: "inline-block",
                   }}
                 />
-                <span>{k}</span>
+                <span>{STATUS_LABELS[k] || k}</span>
                 <span style={{ marginLeft: "auto", opacity: 0.8 }}>{counts.byStatus[k] || 0}</span>
               </div>
             ))}
@@ -420,12 +463,26 @@ export default function WarehouseDashboard() {
           }}
         >
           <div style={{ fontWeight: 700 }}>{hover.bin}</div>
-          <div>Status: {hover.status}</div>
-          {hover.countedQty !== null && <div>Counted Qty: {hover.countedQty}</div>}
-          {hover.counterName && <div>By: {hover.counterName}</div>}
-          {hover.timestamp && <div>At: {hover.timestamp}</div>}
+          <div>
+            Warehouse Area: {hover.area}
+            {hover.tag ? ` (${hover.tag})` : ""}
+          </div>
+          <div>Status: {STATUS_LABELS[hover.status] || hover.status}</div>
+          {hover.piDoc && <div>PI Doc: {hover.piDoc}</div>}
+          {hover.piDoc && <div>Team: {hover.team || "unassigned"}</div>}
+          {hover.lines > 0 && <div>Saved lines: {hover.lines}</div>}
+          {hover.counterName && <div>Last by: {hover.counterName}</div>}
+          {hover.timestamp && <div>At: {String(hover.timestamp).slice(0, 16).replace("T", " ")}</div>}
         </div>
       )}
     </div>
+  );
+}
+
+export default function WarehouseDashboardPage() {
+  return (
+    <AdminGate>
+      <WarehouseDashboard />
+    </AdminGate>
   );
 }

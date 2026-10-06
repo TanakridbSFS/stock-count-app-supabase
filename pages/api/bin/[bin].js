@@ -1,5 +1,67 @@
 import { getBinLines, getRoundBinRecords } from "../../../lib/db";
 import { resolvePiDocForTeam, assertBinInPiDoc } from "../../../lib/pda";
+import { db } from "../../../lib/stocktake";
+import { roundLabel } from "../../../lib/rounds";
+import { padBatch } from "../../../lib/binMasterConvert";
+
+// Recount (Count#2+): the SKUs the admin picked for the round, merged from the Bin
+// Master and the earlier Count results of this bin (so a line Count#1 found that the
+// Master does not have shows up too). Each line carries the latest earlier result.
+async function recountLines(round, bin, masterLines) {
+  const supabase = db();
+  const focus = new Set(round.skus.map(String));
+  const { data: prior, error } = await supabase
+    .from("count_rounds")
+    .select("id, lane, round_number")
+    .eq("stocktake_event_id", round.stocktake_event_id)
+    .eq("lane", "COUNT")
+    .lt("round_number", round.round_number);
+  if (error) throw error;
+  const roundById = Object.fromEntries(prior.map((r) => [r.id, r]));
+  let recs = [];
+  if (prior.length) {
+    const res = await supabase
+      .from("count_records")
+      .select("*")
+      .in("count_round_id", prior.map((r) => r.id))
+      .eq("bin", String(bin).trim())
+      .order("ts", { ascending: true });
+    if (res.error) throw res.error;
+    recs = res.data;
+  }
+  // latest earlier result per mat|batch (higher round wins, then later time)
+  const prev = new Map();
+  for (const r of recs) {
+    if (!r.mat || !focus.has(String(r.mat))) continue;
+    const k = `${r.mat}|${padBatch(r.batch)}`;
+    const cur = prev.get(k);
+    const rn = roundById[r.count_round_id].round_number;
+    if (!cur || rn > cur.rn || (rn === cur.rn && r.ts > cur.rec.ts)) prev.set(k, { rn, rec: r });
+  }
+  const lines = new Map();
+  for (const l of masterLines) {
+    if (!focus.has(String(l.Mat))) continue;
+    lines.set(`${l.Mat}|${l.Batch}`, { ...l, PrevQty: null });
+  }
+  for (const [k, { rn, rec }] of prev) {
+    const line = lines.get(k) || {
+      Bin: rec.bin,
+      Mat: rec.mat,
+      MatName: "",
+      Batch: padBatch(rec.batch),
+      Qty: null,
+      UOM: rec.uom || "",
+      ExpirationDate: "",
+    };
+    line.PrevQty = rec.counted_qty === null ? null : Number(rec.counted_qty);
+    line.PrevRound = roundLabel("COUNT", rn);
+    line.PrevTeam = rec.team_name || rec.counter_name || "";
+    line.PrevTime = rec.ts;
+    line.PrevType = rec.line_type;
+    lines.set(k, line);
+  }
+  return [...lines.values()].sort((a, b) => String(a.Mat).localeCompare(String(b.Mat)) || String(a.Batch).localeCompare(String(b.Batch)));
+}
 
 // GET /api/bin/:bin?piDocId=...&teamName=...&page=1&pageSize=50
 export default async function handler(req, res) {
@@ -21,22 +83,30 @@ export default async function handler(req, res) {
     // counter only adds what is physically there.
     const blind = round.lane === "PRECOUNT";
     // The Master lines and the saved result of this bin are independent.
-    const [allLines, saved] = await Promise.all([
+    const [masterLines, saved] = await Promise.all([
       blind ? [] : getBinLines(event.bin_master_file_id, bin),
       getRoundBinRecords(round.id, bin),
     ]);
-    const knownBin = blind ? true : allLines.length > 0;
+    const recount = round.lane === "COUNT" && Array.isArray(round.skus) && round.skus.length > 0;
+    const allLines = recount ? await recountLines(round, bin, masterLines) : masterLines;
+    const knownBin = blind || recount ? true : allLines.length > 0;
+    const focusSkus = recount ? [...new Set(allLines.map((l) => String(l.Mat)))] : [];
 
     const total = allLines.length;
-    const totalPages = Math.max(1, Math.ceil(total / pageSize));
-    const start = (page - 1) * pageSize;
-    const pageLines = allLines.slice(start, start + pageSize);
+    // a recount shows every focus line on one screen
+    const effPageSize = recount ? Math.max(pageSize, total, 1) : pageSize;
+    const totalPages = Math.max(1, Math.ceil(total / effPageSize));
+    const start = (page - 1) * effPageSize;
+    const pageLines = allLines.slice(start, start + effPageSize);
 
     // `saved`: one result per bin per round — shown again on a re-scan so the
     // counter can edit or remove lines; saving replaces it.
     res.status(200).json({
       bin,
       blind,
+      recount,
+      focusSkus,
+      roundLabel: roundLabel(round.lane, round.round_number),
       knownBin,
       total,
       page,

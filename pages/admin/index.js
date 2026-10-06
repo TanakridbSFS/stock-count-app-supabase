@@ -95,6 +95,10 @@ function AdminConsole() {
             <Item href="/admin/progress" title="Progress">
               Team × PI Doc completion for a round. Refreshes every minute.
             </Item>
+            <Item href="/dashboard" title="Live 3D warehouse dashboard (Frozen room)">
+              3D view of the Frozen room (racks FA–FJ) coloured by count status for the round you pick. Hover a bin to
+              see its Warehouse Area, PI Doc and team.
+            </Item>
             <Item href="/admin/report" title="Consolidated report">
               Latest round wins per Bin + Mat + Batch, with a Pre-Count toggle and CSV download.
             </Item>

@@ -1,6 +1,7 @@
 import { withAdmin } from "../../../../../lib/adminAuth";
 import { db, fetchAll } from "../../../../../lib/stocktake";
 import { normAreaName } from "../../../../../lib/areaNames";
+import { applyDefaultTags } from "../../../../../lib/areaTags";
 
 // GET /api/admin/events/:id — event + per-area summary + current tags
 async function handler(req, res) {
@@ -34,6 +35,9 @@ async function handler(req, res) {
       a.binCount += 1;
       byArea.set(b.warehouse_area_code, a);
     }
+
+    // Store the standing default tags for areas that have none yet (no Save needed).
+    await applyDefaultTags(id, [...byArea.keys()]);
 
     const { data: cls, error: clsErr } = await supabase
       .from("warehouse_area_classification")

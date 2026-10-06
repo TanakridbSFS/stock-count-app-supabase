@@ -1,6 +1,7 @@
 import { findTeamByName, resolvePiDocForTeam, HttpError } from "../../../lib/pda";
 import { db, fetchAll } from "../../../lib/stocktake";
 import { roundLabel } from "../../../lib/rounds";
+import { runAutoAssignEverywhere } from "../../../lib/autoAssign";
 
 // GET /api/pda/pidocs?team=Team12
 //   The team's PI Docs that are in a currently ACTIVE round, with progress.
@@ -34,6 +35,13 @@ export default async function handler(req, res) {
 
     const team = await findTeamByName(req.query.team);
     if (!team) return res.status(404).json({ error: "Unknown team — scan your Team QR again." });
+
+    // Toggle ON somewhere: an idle team opening its list gets its next PI Doc (safety net).
+    try {
+      await runAutoAssignEverywhere({ teamIds: [team.id] });
+    } catch (e) {
+      console.error("auto-assign on list failed", e);
+    }
 
     const { data: docs, error } = await supabase
       .from("pi_docs")

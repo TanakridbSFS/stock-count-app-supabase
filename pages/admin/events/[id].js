@@ -97,10 +97,12 @@ function EventPage() {
           <div className="card">
             <div className="card-title">Warehouse Area Classification</div>
             <div className="card-subtext">
-              Tag every area for this event. PRECOUNT bins go to the Pre-Count
-              lane, COUNT bins are in scope for Count#1 (and later recounts),
-              EXCLUDED areas are left out. Nothing is assumed — pick each one.
-              Counting can't start until every area is tagged.
+              PRECOUNT bins go to the Pre-Count lane, COUNT bins are in scope
+              for Count#1 (and later recounts), EXCLUDED areas are left out.
+              Tags start from the standing defaults and are already stored, so
+              you only change a tag if this event needs it (then press Save).
+              An area with no default must be tagged before a round can be
+              created.
             </div>
             <div style={{ marginBottom: 10 }}>
               <span style={{ fontSize: 14, marginRight: 8 }}>Set all to:</span>

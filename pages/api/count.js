@@ -1,4 +1,5 @@
 import { replaceRoundCountRecords } from "../../lib/db";
+import { afterPiDocSaved } from "../../lib/autoAssign";
 import { resolvePiDocForTeam, assertBinInPiDoc } from "../../lib/pda";
 import { padBatch } from "../../lib/binMasterConvert";
 import { nowThailandISOString } from "../../lib/time";
@@ -56,6 +57,14 @@ export default async function handler(req, res) {
       rows,
       removedLines.map((r) => ({ mat: r.mat || "", batch: padBatch(r.batch) }))
     );
+    // Auto-assign toggle ON: a finished PI Doc frees this team for the next one.
+    if (round.auto_assign) {
+      try {
+        await afterPiDocSaved(round, piDoc.id);
+      } catch (e) {
+        console.error("auto-assign after save failed", e);
+      }
+    }
     res.status(200).json({ ok: true, written: rows.length, removed: removedLines.length });
   } catch (err) {
     if (err.status) return res.status(err.status).json({ error: err.message });

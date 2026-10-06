@@ -1,6 +1,7 @@
 import { withAdmin } from "../../../lib/adminAuth";
 import { db } from "../../../lib/stocktake";
 import { AREA_TYPES, areaTypeOf } from "../../../lib/capabilities";
+import { releaseUnstartedDocs, runAutoAssignEverywhere } from "../../../lib/autoAssign";
 
 // Team master + permanent capabilities (COUNT lane only). A team may count
 // the cross product of its storage locations x its types (Picking / Reserve).
@@ -8,6 +9,9 @@ import { AREA_TYPES, areaTypeOf } from "../../../lib/capabilities";
 //   POST   { action: "add", name }                      add one team (TeamNN)
 //   POST   { action: "bulk", from, to }                 add Team<from>..Team<to> (skips existing)
 //   PATCH  { teamId, locations: [...], types: [...] }   replace the team's capability
+//   PATCH  { teamId, active: boolean }                  present / absent today. Inactive: cannot log in on a PDA,
+//                                                       its not-yet-started PI Docs go back to the pool, and
+//                                                       auto-assign refills idle teams
 //   DELETE ?id=...                                      remove a team (refused if it has PI Docs)
 const TEAM_NAME = /^Team\d{2,3}$/;
 
@@ -80,7 +84,14 @@ async function handler(req, res) {
     }
 
     if (req.method === "PATCH") {
-      const { teamId, locations, types } = req.body || {};
+      const { teamId, locations, types, active } = req.body || {};
+      if (teamId && typeof active === "boolean") {
+        const { error: aErr } = await supabase.from("teams").update({ active }).eq("id", teamId);
+        if (aErr) throw aErr;
+        const released = active ? 0 : await releaseUnstartedDocs(teamId);
+        const assigned = await runAutoAssignEverywhere();
+        return res.status(200).json({ ok: true, released, assigned: assigned.length });
+      }
       if (!teamId || !Array.isArray(locations) || !Array.isArray(types)) {
         return res.status(400).json({ error: "Missing teamId, locations or types" });
       }

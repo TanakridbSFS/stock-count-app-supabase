@@ -147,7 +147,7 @@ function ControlPage() {
                 <td>{r.status}</td>
                 <td className="num">{r.piDocCount}</td>
                 <td className="num">{r.assignedCount}</td>
-                <td style={{ whiteSpace: "nowrap" }}>
+                <td style={{ display: "flex", flexWrap: "wrap", gap: 6, alignItems: "center" }}>
                   <Link href={`/admin/pidocs?roundId=${r.id}`} className="btn btn-secondary btn-sm">
                     PI Docs
                   </Link>
@@ -194,8 +194,8 @@ function ControlPage() {
         {l === "PRECOUNT" && (
           <div style={{ marginTop: 14 }}>
             <div className="card-subtext">
-              A new Pre-Count round takes every bin in PRECOUNT-tagged areas and auto-builds PI Docs (5 contiguous bins each),
-              numbered Pre-202610XXXX (from round 2: Pre-202610XXXX-2).
+              A new Pre-Count round takes every bin in PRECOUNT-tagged areas and auto-builds one PI Doc per bin
+              (1 team : 1 bin), numbered Pre-202610XXXX (from round 2: Pre-202610XXXX-2).
             </div>
             <button className="btn btn-primary btn-sm" disabled={busy || !eventId} onClick={createPrecount}>
               Create Pre-Count{list.length + 1}
@@ -274,7 +274,7 @@ function ControlPage() {
         </select>
       </div>
 
-      <div className="admin-grid">
+      <div className="admin-grid lanes">
         {lanePanel("PRECOUNT")}
         {lanePanel("COUNT")}
       </div>
