@@ -56,6 +56,28 @@ function ReportPage() {
 
   const s = data?.summary;
 
+  // ---- export in the WMS layout (YEAR_COUNT_RESULT_CR_EXPORT) ----
+  const [wmsOrder, setWmsOrder] = useState("");
+  const [wmsPlant, setWmsPlant] = useState("1102");
+  const [wmsDate, setWmsDate] = useState(""); // YYYYMMDD, empty = date of the latest count
+  const [wmsOnlyDiff, setWmsOnlyDiff] = useState(false);
+  const [wmsPreview, setWmsPreview] = useState(null);
+  const wmsQuery = () =>
+    `eventId=${eventId}&includePrecount=${includePrecount ? 1 : 0}&wmsPiOrderNo=${encodeURIComponent(wmsOrder)}` +
+    `&plant=${encodeURIComponent(wmsPlant)}&countDate=${encodeURIComponent(wmsDate)}&onlyDifferences=${wmsOnlyDiff ? 1 : 0}`;
+  async function previewWms() {
+    setError("");
+    setWmsPreview(null);
+    try {
+      const res = await fetch(`/api/admin/report?${wmsQuery()}&format=wms-preview`);
+      const json = await res.json();
+      if (!res.ok) throw new Error(json.error || "Failed to build the WMS export");
+      setWmsPreview(json);
+    } catch (e) {
+      setError(e.message);
+    }
+  }
+
   return (
     <div className="page page-admin">
       <div className="admin-header">
@@ -126,6 +148,65 @@ function ReportPage() {
       </div>
 
       <div className="card" style={{ marginTop: 16 }}>
+        <div className="card-title">Export in WMS format (YEAR_COUNT_RESULT_CR_EXPORT .xlsx)</div>
+        <div className="card-subtext">
+          One row per Material + Batch (counted lines only, summed over bins) in the layout of the WMS count-result
+          file, plus a last column <b>PI Doc</b>. Uses the same Pre-Count setting as above.
+        </div>
+        <div className="field-row">
+          <div className="field">
+            <label>wmsPiOrderNo</label>
+            <input value={wmsOrder} onChange={(e) => setWmsOrder(e.target.value)} placeholder="e.g. PD26091700000103" />
+          </div>
+          <div className="field">
+            <label>Plant</label>
+            <input value={wmsPlant} onChange={(e) => setWmsPlant(e.target.value)} />
+          </div>
+          <div className="field">
+            <label>Count date (YYYYMMDD)</label>
+            <input value={wmsDate} onChange={(e) => setWmsDate(e.target.value)} placeholder="empty = date of latest count" />
+          </div>
+        </div>
+        <label style={{ fontSize: 15, display: "block", marginBottom: 10 }}>
+          <input
+            type="checkbox"
+            checked={wmsOnlyDiff}
+            onChange={(e) => setWmsOnlyDiff(e.target.checked)}
+            style={{ width: 18, height: 18, marginRight: 8 }}
+          />
+          Only rows with a difference
+        </label>
+        <button className="btn btn-secondary btn-sm" disabled={!eventId} onClick={previewWms}>
+          Preview
+        </button>
+        <a
+          className="btn btn-primary btn-sm"
+          style={{ textDecoration: "none" }}
+          href={`/api/admin/report?${wmsQuery()}&format=wms`}
+        >
+          Download .xlsx
+        </a>
+        {wmsPreview && (
+          <div style={{ marginTop: 12, fontSize: 14 }}>
+            <div>
+              <b>{wmsPreview.total}</b> row(s) · count date {wmsPreview.countDate}
+            </div>
+            {wmsPreview.warnings.map((w, i) => (
+              <div key={i} className="banner banner-warn" style={{ marginTop: 6 }}>
+                {w}
+              </div>
+            ))}
+            {wmsPreview.rows.slice(0, 5).map((r, i) => (
+              <div key={i} style={{ fontFamily: "monospace", fontSize: 12 }}>
+                {r.storageLocation} · {r.material} · {r.batch} · count {r["Count QTY"]} · WMS {r["WMS QTY"]} · diff {r.Diff} ·{" "}
+                {r["Is Difference"]}
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+
+      <div className="card" style={{ marginTop: 16 }}>
         <div className="table-scroll">
           <table className="admin-table">
             <thead>
@@ -139,6 +220,7 @@ function ReportPage() {
                 <th className="num">Diff</th>
                 <th>Status</th>
                 <th>Round</th>
+                <th>vs earlier</th>
                 <th>Team</th>
               </tr>
             </thead>
@@ -156,12 +238,19 @@ function ReportPage() {
                   </td>
                   <td>{r.Status}</td>
                   <td>{r.Round}</td>
+                  <td
+                    style={{
+                      color: r["vs Earlier Count"] === "CHANGED" ? "#b45309" : r["vs Earlier Count"] ? "#166534" : undefined,
+                    }}
+                  >
+                    {r["vs Earlier Count"]}
+                  </td>
                   <td>{r.Team}</td>
                 </tr>
               ))}
               {rows.length === 0 && (
                 <tr>
-                  <td colSpan={10} style={{ color: "#888" }}>
+                  <td colSpan={11} style={{ color: "#888" }}>
                     {loading ? "Loading…" : "No lines."}
                   </td>
                 </tr>

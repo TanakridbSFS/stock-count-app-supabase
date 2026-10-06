@@ -31,9 +31,10 @@ const digitsOnly = (v) => String(v).replace(/\D/g, "");
 
 const lineKeyOf = (mat, batch) => `${mat || ""}|${padBatch(batch)}`;
 
-// Type of a saved line from expected vs counted quantity.
+// Type of a saved line from expected (Master) vs counted quantity. The Master has
+// nothing and nothing is found (a Count#1 NEW line that is gone) = no difference.
 function typeOfQty(expected, counted) {
-  if (expected === null || expected === undefined || expected === "") return "NEW";
+  if (expected === null || expected === undefined || expected === "") return Number(counted) === 0 ? "MATCH" : "NEW";
   if (counted === 0) return "ZERO";
   return Number(counted) === Number(expected) ? "MATCH" : "ADJUSTED";
 }
@@ -301,6 +302,9 @@ export default function CountBinPage() {
         expectedQty: l.Qty === null ? "" : l.Qty,
         countedQty,
         lineType,
+        // recount only (display on the confirm screen, not saved)
+        prevQty: data.recount && l.PrevQty !== undefined ? l.PrevQty : null,
+        prevRound: data.recount ? l.PrevRound || "" : "",
       });
     }
 
@@ -457,10 +461,34 @@ export default function CountBinPage() {
                   <div className="card-row"><span>Mat</span><b>{l.mat}{l.matName ? ` — ${l.matName}` : ""}</b></div>
                   <div className="card-row"><span>Batch</span><b>{l.batch || "—"}</b></div>
                   <div className="card-row"><span>Expected</span><b>{l.expectedQty === "" ? "—" : <>{l.expectedQty} <UomText uom={l.uom} /></>}</b></div>
-                  <div className="card-row"><span>Counted</span><b>{l.countedQty} <UomText uom={l.uom} /></b></div>
+                  {l.prevRound && (
+                    <div className="card-row">
+                      <span>{l.prevRound}</span>
+                      <b>{l.prevQty === null ? "not counted" : <>{l.prevQty} <UomText uom={l.uom} /></>}</b>
+                    </div>
+                  )}
+                  <div className="card-row">
+                    <span>{data?.recount ? data.roundLabel : "Counted"}</span>
+                    <b>{l.countedQty} <UomText uom={l.uom} /></b>
+                  </div>
                 </>
               )}
               <span className={`badge badge-${l.lineType.toLowerCase()}`}>{l.lineType}</span>
+              {l.prevRound && l.prevQty !== null && (
+                <>
+                  {" "}
+                  <span
+                    className="badge"
+                    style={
+                      Number(l.prevQty) === Number(l.countedQty)
+                        ? { background: "#dcfce7", color: "#166534" }
+                        : { background: "#fef3c7", color: "#92400e" }
+                    }
+                  >
+                    {Number(l.prevQty) === Number(l.countedQty) ? "CONFIRMED" : "CHANGED"}
+                  </span>
+                </>
+              )}
             </div>
           ))}
 
