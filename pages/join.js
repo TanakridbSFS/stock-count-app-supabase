@@ -17,6 +17,8 @@ export default function JoinPiDocPage() {
     if (ready && !session?.counterName) router.replace("/");
   }, [ready, session, router]);
 
+  const cacheKey = (team) => `pidocs_list_${team}`;
+
   async function load() {
     if (!session?.counterName) return;
     setError("");
@@ -25,13 +27,23 @@ export default function JoinPiDocPage() {
       const json = await res.json();
       if (!res.ok) throw new Error(json.error || "Failed to load PI Docs");
       setPiDocs(json.piDocs);
+      try {
+        localStorage.setItem(cacheKey(session.counterName), JSON.stringify(json.piDocs));
+      } catch {}
     } catch (e) {
       setError(e.message);
-      setPiDocs([]);
+      setPiDocs((prev) => prev || []);
     }
   }
 
   useEffect(() => {
+    if (!session?.counterName) return;
+    // Show the list from the last visit straight away (marked as refreshing);
+    // the fresh list replaces it when the server answers.
+    try {
+      const cached = JSON.parse(localStorage.getItem(cacheKey(session.counterName)) || "null");
+      if (Array.isArray(cached)) setPiDocs(cached);
+    } catch {}
     load();
   }, [session?.counterName]);
 

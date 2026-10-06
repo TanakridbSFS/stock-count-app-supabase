@@ -52,23 +52,31 @@ export default async function handler(req, res) {
     const activeRound = Object.fromEntries(rounds.filter((r) => r.status === "ACTIVE").map((r) => [r.id, r]));
     const active = docs.filter((d) => activeRound[d.count_round_id]);
 
-    const out = [];
-    for (const d of active) {
-      const [bins, recs] = await Promise.all([
-        fetchAll(() => supabase.from("pi_doc_bins").select("bin_location_code").eq("pi_doc_id", d.id).order("id")),
-        fetchAll(() => supabase.from("count_records").select("bin").eq("pi_doc_id", d.id).order("id")),
-      ]);
-      const counted = new Set(recs.map((r) => r.bin));
+    // Bins and counted bins of ALL the team's PI Docs in two parallel queries
+    // (was two queries per PI Doc, one PI Doc after another).
+    const ids = active.map((d) => d.id);
+    if (ids.length === 0) return res.status(200).json({ team: team.name, piDocs: [] });
+    const [bins, recs] = await Promise.all([
+      fetchAll(() => supabase.from("pi_doc_bins").select("pi_doc_id, bin_location_code").in("pi_doc_id", ids).order("id")),
+      fetchAll(() => supabase.from("count_records").select("pi_doc_id, bin").in("pi_doc_id", ids).order("id")),
+    ]);
+    const binsByDoc = {};
+    for (const b of bins) (binsByDoc[b.pi_doc_id] ||= []).push(b.bin_location_code);
+    const countedByDoc = {};
+    for (const r of recs) (countedByDoc[r.pi_doc_id] ||= new Set()).add(r.bin);
+
+    const out = active.map((d) => {
       const r = activeRound[d.count_round_id];
-      out.push({
+      const mine = binsByDoc[d.id] || [];
+      return {
         id: d.id,
         piDocNo: d.pi_doc_no,
         area: d.warehouse_area_code,
         roundLabel: roundLabel(r.lane, r.round_number),
-        binCount: bins.length,
-        binsCounted: bins.filter((b) => counted.has(b.bin_location_code)).length,
-      });
-    }
+        binCount: mine.length,
+        binsCounted: mine.filter((b) => countedByDoc[d.id]?.has(b)).length,
+      };
+    });
     res.status(200).json({ team: team.name, piDocs: out });
   } catch (err) {
     if (err instanceof HttpError) return res.status(err.status).json({ error: err.message });

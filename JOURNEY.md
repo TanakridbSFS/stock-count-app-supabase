@@ -76,3 +76,15 @@ First reference for any session. Append a dated entry after each stage.
 3. PDA count page: combo scan Mat|Batch|Qty fills all three, cursor goes to "+ New Line"; Mat/Batch/Qty numeric keypad; Batch always 10 digits; finished NEW lines show Edit / Remove; re-scan shows the latest saved result and saving replaces it (one result per bin per round, `replaceRoundCountRecords`, `removed` list in /api/count); Pre-Count is a blind count (no Master lines, `blind` flag from /api/bin).
 4. Tested on the live DB with throw-away rows (ZZTEST2 event, Team97): 24/27 checks passed; the other 3 were wrong expectations in the script (existing F001-Reserve default; 4 bins split by odd/even face into 2 PI Docs). Rows deleted; Test#1 untouched.
 5. Not changed: Pre-Count1 of Test#1 keeps its manually renamed `Pre-...` numbers (still valid).
+
+## Test notes — performance (2026-10-05, notes only)
+13. Slowness when refreshing the PI Doc list on the PDA (/join -> GET /api/pda/pidocs). Setup: Supabase probably Tokyo (to confirm in Project Settings), Vercel Hobby, vercel.json has no `regions` so Functions run in iad1 (Washington). Cause: each API call makes many sequential DB round trips and each one crosses the Pacific; the list endpoint does 3 queries + 2 per PI Doc one PI Doc after another (~13 trips for a team with 10 PI Docs). Plan (free): (a) `"regions": ["hnd1"]` in vercel.json (Hobby allows a single region), (b) batch the list into ~4 trips with `.in("pi_doc_id", ids)` for bins and records (or one SQL function), run independent queries in parallel in resolvePiDocForTeam / /api/bin, (c) show the last list from localStorage immediately while refreshing, (d) check an index on bin_master_raw(master_file_id, container_code) after the next upload, (e) load test with ~59 teams before 17.10.2026. Pay only if still slow: Supabase Pro ~$25/mo for the count month.
+14. Test data (user asked, 2026-10-05): filled Count#1 of event Block_Sample_Precount with random results for every uncounted bin (device_id='TEST-RANDOM'); the 1 hand-counted bin was kept.
+
+## 2026-10-06 — Performance fixes (pushed)
+- `vercel.json`: `"regions": ["hnd1"]` (Hobby = one region). Verify Supabase region in Project Settings; if it is Singapore change to `sin1`.
+- `resolvePiDocForTeam`: 5 sequential queries -> 3 levels in parallel (round fetched together with its event). `/api/bin` and `/api/count` run the PI Doc check and bin membership check together; `/api/bin` loads Master lines and the saved result together.
+- `/api/pda/pidocs` list: bins and counted bins of all the team's PI Docs in 2 parallel queries (was 2 per PI Doc, one after another).
+- `/join`: last list is shown immediately from localStorage and refreshed in the background.
+- `@vercel/speed-insights` is now mounted in `_app.js` (it was installed but unused) so Vercel Speed Insights gets data.
+- Re-ran the live-DB e2e: same 24 passes, same 3 known script-expectation mismatches -> behaviour unchanged. Timing on Vercel not yet measured (no ACTIVE round with assigned PI Docs at the time).

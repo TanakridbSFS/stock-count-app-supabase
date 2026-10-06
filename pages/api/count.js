@@ -29,8 +29,10 @@ export default async function handler(req, res) {
 
   try {
     // The team must own the PI Doc, its round must be ACTIVE, and the bin must be in the PI Doc.
-    const { team, piDoc, round } = await resolvePiDocForTeam(piDocId, counterName);
-    await assertBinInPiDoc(piDocId, bin);
+    const [{ team, piDoc, round }] = await Promise.all([
+      resolvePiDocForTeam(piDocId, counterName),
+      assertBinInPiDoc(piDocId, bin),
+    ]);
 
     const timestamp = nowThailandISOString();
     const rows = lines.map((line) => ({

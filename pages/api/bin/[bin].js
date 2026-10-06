@@ -12,13 +12,19 @@ export default async function handler(req, res) {
   const pageSize = Math.max(1, parseInt(req.query.pageSize || "50", 10));
 
   try {
-    const { round, event } = await resolvePiDocForTeam(piDocId, teamName);
-    await assertBinInPiDoc(piDocId, bin);
+    const [{ round, event }] = await Promise.all([
+      resolvePiDocForTeam(piDocId, teamName),
+      assertBinInPiDoc(piDocId, bin),
+    ]);
 
     // Pre-Count is a blind count: the Bin Master items are not shown, the
     // counter only adds what is physically there.
     const blind = round.lane === "PRECOUNT";
-    const allLines = blind ? [] : await getBinLines(event.bin_master_file_id, bin);
+    // The Master lines and the saved result of this bin are independent.
+    const [allLines, saved] = await Promise.all([
+      blind ? [] : getBinLines(event.bin_master_file_id, bin),
+      getRoundBinRecords(round.id, bin),
+    ]);
     const knownBin = blind ? true : allLines.length > 0;
 
     const total = allLines.length;
@@ -26,10 +32,8 @@ export default async function handler(req, res) {
     const start = (page - 1) * pageSize;
     const pageLines = allLines.slice(start, start + pageSize);
 
-    // One saved result per bin per round — shown again on a re-scan so the
+    // `saved`: one result per bin per round — shown again on a re-scan so the
     // counter can edit or remove lines; saving replaces it.
-    const saved = await getRoundBinRecords(round.id, bin);
-
     res.status(200).json({
       bin,
       blind,
