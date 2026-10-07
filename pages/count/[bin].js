@@ -1,7 +1,6 @@
 import { useEffect, useState, useCallback, useRef } from "react";
 import { useRouter } from "next/router";
 import { useSession } from "../../lib/useSession";
-import { UOM_OPTIONS } from "../../lib/uomOptions";
 import { padBatch } from "../../lib/binMasterConvert";
 import MATERIAL_UOM from "../../lib/materialUom.json";
 
@@ -53,10 +52,7 @@ function emptyNewLine() {
   return {
     mat: "",
     batch: "",
-    uom: UOM_OPTIONS[0],
-    // true once the counter has explicitly chosen to override the
-    // Master-supplied UOM for this row (see masterUomFor above).
-    uomOverride: false,
+    uom: "", // always the Master_UOM unit of the Mat (masterUomFor); empty = Mat not in the list
     countedQty: "",
     // true while the fields are open for typing; a finished line shows as a
     // compact row with Edit / Remove buttons.
@@ -154,7 +150,7 @@ export default function CountBinPage() {
               ...emptyNewLine(),
               mat: r.mat,
               batch: r.batch,
-              uom: r.uom || UOM_OPTIONS[0],
+              uom: r.uom || masterUomFor(r.mat) || "",
               countedQty: String(r.countedQty),
               editing: false,
             }))
@@ -183,12 +179,6 @@ export default function CountBinPage() {
 
   function markWrong(key) {
     updateEdit(key, { status: "wrong", countedQty: "" });
-  }
-
-  function markNotFound(key) {
-    // 0 is already a definitive answer — close it right away, same as
-    // finishing a typed quantity.
-    updateEdit(key, { status: "wrong_closed", countedQty: "0" });
   }
 
   // Closes the box after typing an actual quantity for a "ผิด" line —
@@ -236,7 +226,7 @@ export default function CountBinPage() {
       mat: digitsOnly(combo.mat),
       batch: combo.batch,
       ...(done ? { countedQty: combo.qty, editing: false } : {}),
-      ...(match && !nl.uomOverride ? { uom: match } : {}),
+      uom: match || "",
     });
     if (done) focusAddButton();
     else setTimeout(() => document.getElementById(`newline-${nl._key}-qty`)?.focus(), 60);
@@ -249,12 +239,16 @@ export default function CountBinPage() {
       setError("Please enter the Mat for this line.");
       return;
     }
+    if (!masterUomFor(nl.mat)) {
+      setError("ไม่พบ Mat นี้ในรายการหน่วย");
+      return;
+    }
     if (String(nl.countedQty).trim() === "") {
       setError(`Please enter a quantity for Mat ${nl.mat}.`);
       return;
     }
     setError("");
-    updateNewLine(idx, { batch: padBatch(nl.batch), editing: false });
+    updateNewLine(idx, { batch: padBatch(nl.batch), uom: masterUomFor(nl.mat), editing: false });
     focusAddButton();
   }
 
@@ -276,13 +270,13 @@ export default function CountBinPage() {
       }
       if (e.status === "wrong") {
         // Still open (not closed with "Confirm" yet) — not ready to save.
-        setError(`Please finish ${l.Mat} (${l.Batch}) — enter a quantity and tap "Confirm", or use "No Product".`);
+        setError(`Please finish ${l.Mat} (${l.Batch}) — enter a quantity (0 if nothing is there) and tap "Confirm".`);
         return null;
       }
       if (e.status === "wrong_closed" && String(e.countedQty).trim() === "") {
-        // Shouldn't happen (closeWrong/markNotFound only ever set this with
+        // Shouldn't happen (closeWrong only ever sets this with
         // a value), but guard anyway rather than silently falling through.
-        setError(`Please enter a quantity for ${l.Mat} (${l.Batch}), or use "No Product" for 0.`);
+        setError(`Please enter a quantity for ${l.Mat} (${l.Batch}) — 0 if nothing is there.`);
         return null;
       }
       // Count: "Correct" = the Master quantity is right. Recount: "Correct" = the
@@ -320,11 +314,22 @@ export default function CountBinPage() {
         setError(`Please enter a quantity for the new line (Mat: ${nl.mat || "—"}).`);
         return null;
       }
+      if (!masterUomFor(nl.mat)) {
+        setError(`ไม่พบ Mat นี้ในรายการหน่วย (Mat: ${nl.mat})`);
+        return null;
+      }
+      // One result per Mat + Batch in a bin: a second line with the same Mat + Batch is added to the first.
+      const same = lines.find((x) => x.lineType === "NEW" && x.mat === nl.mat && x.batch === padBatch(nl.batch));
+      if (same) {
+        same.countedQty += Number(nl.countedQty);
+        same.merged = (same.merged || 1) + 1;
+        continue;
+      }
       lines.push({
         mat: nl.mat,
         matName: "",
         batch: padBatch(nl.batch),
-        uom: nl.uom,
+        uom: masterUomFor(nl.mat),
         expectedQty: "",
         countedQty: Number(nl.countedQty),
         lineType: "NEW",
@@ -478,6 +483,11 @@ export default function CountBinPage() {
                 </>
               )}
               <span className={`badge badge-${l.lineType.toLowerCase()}`}>{l.lineType}</span>
+              {l.merged > 1 && (
+                <span style={{ marginLeft: 8, fontSize: 12, color: "#667085" }}>
+                  {l.merged} lines with the same Mat + Batch added together
+                </span>
+              )}
               {l.prevRound && l.prevQty !== null && (
                 <>
                   {" "}
@@ -669,9 +679,6 @@ export default function CountBinPage() {
                     <button className="btn btn-primary btn-sm" onClick={() => closeWrong(k, e.countedQty)}>
                       Confirm
                     </button>
-                    <button className="btn btn-warn btn-sm" onClick={() => markNotFound(k)}>
-                      No Product
-                    </button>
                     {!(data.recount && (l.PrevQty === null || l.PrevQty === undefined)) && (
                       <button className="btn btn-secondary btn-sm" onClick={() => undoAnswer(k)}>
                         Cancel
@@ -739,7 +746,7 @@ export default function CountBinPage() {
                         // Fresh lookup on every keystroke — once the Mat code
                         // matches something in Master_UOM, auto-fill its UOM
                         // (unless the counter already chose to override it).
-                        ...(match && !nl.uomOverride ? { uom: match } : {}),
+                        uom: match || "",
                       });
                     }}
                     onKeyDown={(e) => {
@@ -780,34 +787,12 @@ export default function CountBinPage() {
                 </div>
                 <div className="field">
                   <label>UOM</label>
-                  {masterUom && !nl.uomOverride ? (
-                    <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-                      <b><UomText uom={masterUom} /></b>
-                      <span style={{ fontSize: 12, color: "#666" }}>(from Master)</span>
-                      <button
-                        className="btn btn-secondary btn-sm"
-                        onClick={() => updateNewLine(idx, { uomOverride: true })}
-                      >
-                        Override
-                      </button>
-                    </div>
+                  {masterUom ? (
+                    <b><UomText uom={masterUom} /></b>
                   ) : (
-                    <>
-                      <select value={nl.uom} onChange={(e) => updateNewLine(idx, { uom: e.target.value })}>
-                        {UOM_OPTIONS.map((u) => (
-                          <option key={u} value={u}>{u}</option>
-                        ))}
-                      </select>
-                      {masterUom && (
-                        <button
-                          className="btn btn-secondary btn-sm"
-                          style={{ marginTop: 6 }}
-                          onClick={() => updateNewLine(idx, { uomOverride: false, uom: masterUom })}
-                        >
-                          Use Master ({masterUom})
-                        </button>
-                      )}
-                    </>
+                    <span style={{ color: nl.mat.length >= 8 ? "#b42318" : "#667085" }}>
+                      {nl.mat.length >= 8 ? "ไม่พบ Mat นี้ในรายการหน่วย" : "—"}
+                    </span>
                   )}
                 </div>
                 <div className="field">

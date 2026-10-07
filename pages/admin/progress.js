@@ -10,6 +10,14 @@ function ProgressPage() {
   const [roundId, setRoundId] = useState("");
   const [data, setData] = useState(null);
   const [error, setError] = useState("");
+  const [tab, setTab] = useState("ALL"); // storage location tab (F001, C001, C002, ...)
+  const [now, setNow] = useState(Date.now());
+
+  // 1-second tick for the "working on current PI Doc" timers
+  useEffect(() => {
+    const t = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(t);
+  }, []);
 
   useEffect(() => {
     fetch("/api/admin/events")
@@ -48,9 +56,15 @@ function ProgressPage() {
     return () => clearInterval(t);
   }, [roundId]);
 
+  const locations = useMemo(
+    () => [...new Set((data?.piDocs || []).map((d) => d.sap_storage_location).filter(Boolean))].sort(),
+    [data]
+  );
+  const shownTab = tab === "ALL" || locations.includes(tab) ? tab : "ALL";
+
   const byTeam = useMemo(() => {
     const m = new Map();
-    for (const d of data?.piDocs || []) {
+    for (const d of (data?.piDocs || []).filter((x) => shownTab === "ALL" || x.sap_storage_location === shownTab)) {
       const name = d.teamName || "— unassigned —";
       const t = m.get(name) || { name, docs: [], bins: 0, counted: 0, docsDone: 0 };
       t.docs.push(d);
@@ -60,7 +74,22 @@ function ProgressPage() {
       m.set(name, t);
     }
     return [...m.values()].sort((a, b) => a.name.localeCompare(b.name));
-  }, [data]);
+  }, [data, shownTab]);
+
+  // Time on the PI Doc the team is working on now: started (first bin saved) but not finished;
+  // if several, the latest one started. Empty when the team has no such PI Doc.
+  const workingSince = (t) => {
+    const open = t.docs.filter((d) => d.startedAt && d.binsCounted < d.binCount);
+    if (!open.length) return null;
+    return open.map((d) => new Date(d.startedAt).getTime()).sort((a, b) => b - a)[0];
+  };
+  const fmtElapsed = (ms) => {
+    const s = Math.max(0, Math.floor(ms / 1000));
+    const h = Math.floor(s / 3600);
+    const m = Math.floor((s % 3600) / 60);
+    const p = (n) => String(n).padStart(2, "0");
+    return h ? `${h}:${p(m)}:${p(s % 60)}` : `${p(m)}:${p(s % 60)}`;
+  };
 
   const totals = byTeam.reduce(
     (a, t) => ({ bins: a.bins + t.bins, counted: a.counted + t.counted, docs: a.docs + t.docs.length, done: a.done + t.docsDone }),
@@ -110,11 +139,23 @@ function ProgressPage() {
             PI Docs complete <b>{totals.done}</b> / {totals.docs} · Bins counted <b>{totals.counted}</b> / {totals.bins} (
             {pct(totals.counted, totals.bins)}%) · auto-refreshes every minute
           </div>
+          <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 10 }}>
+            {["ALL", ...locations].map((loc) => (
+              <button
+                key={loc}
+                className={`btn btn-sm ${shownTab === loc ? "btn-primary" : "btn-secondary"}`}
+                onClick={() => setTab(loc)}
+              >
+                {loc === "ALL" ? "All" : loc}
+              </button>
+            ))}
+          </div>
           <div className="card">
             <table className="admin-table">
               <thead>
                 <tr>
                   <th>Team</th>
+                  <th className="num">Time on current PI Doc</th>
                   <th className="num">PI Docs</th>
                   <th className="num">Done</th>
                   <th className="num">Bins counted</th>
@@ -126,6 +167,9 @@ function ProgressPage() {
                 {byTeam.map((t) => (
                   <tr key={t.name}>
                     <td>{t.name}</td>
+                    <td className="num" style={{ fontVariantNumeric: "tabular-nums" }}>
+                      {workingSince(t) ? fmtElapsed(now - workingSince(t)) : "—"}
+                    </td>
                     <td className="num">{t.docs.length}</td>
                     <td className="num">{t.docsDone}</td>
                     <td className="num">
@@ -152,7 +196,7 @@ function ProgressPage() {
                 ))}
                 {byTeam.length === 0 && (
                   <tr>
-                    <td colSpan={6} style={{ color: "#888" }}>
+                    <td colSpan={7} style={{ color: "#888" }}>
                       No PI Docs in this round.
                     </td>
                   </tr>

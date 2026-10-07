@@ -41,10 +41,14 @@ async function handler(req, res) {
       for (const b of binRows) (binsByDoc[b.pi_doc_id] ||= []).push(b.bin_location_code);
 
       const recs = await fetchAll(() =>
-        supabase.from("count_records").select("pi_doc_id, bin").eq("count_round_id", roundId).order("id")
+        supabase.from("count_records").select("pi_doc_id, bin, ts").eq("count_round_id", roundId).order("id")
       );
       const countedByDoc = {};
-      for (const r of recs) (countedByDoc[r.pi_doc_id] ||= new Set()).add(r.bin);
+      const firstAtByDoc = {}; // when the first bin of the PI Doc was saved (start of the work)
+      for (const r of recs) {
+        (countedByDoc[r.pi_doc_id] ||= new Set()).add(r.bin);
+        if (!firstAtByDoc[r.pi_doc_id] || r.ts < firstAtByDoc[r.pi_doc_id]) firstAtByDoc[r.pi_doc_id] = r.ts;
+      }
 
       const { data: teamRows, error: tErr } = await supabase.from("teams").select("id, name").eq("active", true).order("name");
       if (tErr) throw tErr;
@@ -67,6 +71,7 @@ async function handler(req, res) {
           binCount: (binsByDoc[d.id] || []).length,
           binsCounted: (binsByDoc[d.id] || []).filter((b) => countedByDoc[d.id]?.has(b)).length,
           firstBin: (binsByDoc[d.id] || []).sort()[0] || null,
+          startedAt: firstAtByDoc[d.id] || null,
         })),
       });
     }

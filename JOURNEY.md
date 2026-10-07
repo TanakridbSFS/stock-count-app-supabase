@@ -149,3 +149,10 @@ W10 add (user): the WMS-format export gets one extra column 'PI Doc' (our own PI
 - 2026-10-07: migration 007 (auto_assign_claim) has been run in Supabase by the user.
 
 - 2026-10-07: SAP report format export changed: one row per Bin+Mat+Batch+Status; wmsPiOrderNo = our PI Doc (input box removed); col 20 Bin Location, 21 Team, 22 Round. Card renamed from 'Export in WMS format'. All counting data of every event was wiped (teams, capabilities, area defaults kept).
+
+## 2026-10-07 — Walk-through notes (not implemented yet)
+- N1: remove the "No Product" button (count screen, "Wrong" state); the user types 0 instead. Texts that mention it must change too.
+- N2: bug — in Pre-Count two new lines with the same Mat+Batch are both saved (two records), but the bin shows only one when re-opened/edited (the loader keeps the latest per Mat+Batch). Decide: merge (sum) or block duplicates in the same bin.
+- N3: remove the UOM dropdown/Override on new lines; UOM comes from Master_UOM by Mat (open: what to do for a Mat not in that list).
+- N4: timer on the Progress page (open: countdown to next refresh, or elapsed time per team / PI Doc?).
+- 2026-10-07 implemented N1-N4 (not committed): No Product button removed; same Mat+Batch new lines stay separate while editing but are added together in the summary/save; new-line UOM is read-only from Master_UOM and a Mat not in the list is blocked ("ไม่พบ Mat นี้ในรายการหน่วย"); Progress page: column "Time on current PI Doc" (since the first bin of the started, unfinished PI Doc was saved; ticks every second) and tabs per storage location (All, F001, C001, ...).
