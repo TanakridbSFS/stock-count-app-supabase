@@ -146,3 +146,4 @@ W10 add (user): the WMS-format export gets one extra column 'PI Doc' (our own PI
 - PDA Count#2: Master Qty hidden on the count and confirm screens. A line the earlier round never counted (e.g. a bin Count#1 did not cover) goes straight to "enter the quantity" (no Correct/Wrong).
 - Level-G rule (`lib/areaRules.js`, auto-generated Count#2+ PI Docs only): in F001, Reserve bins ending `-G` are counted as Picking. The PI Doc carries the Picking area name (so team capabilities apply) but keeps zone RESERVE (the marker for "give out last"), is numbered after all other PI Docs and handed out only when nothing else is left. Master and area tags are not changed.
 - Test#2_17Oct: Count#2 deleted and recreated (20 PI Docs, 2026100019-2 .. 038-2; docs 035-038 are the G bins), activated, auto-assign ON. Auto-assign spread checked on the live event.
+- 2026-10-07: migration 007 (auto_assign_claim) has been run in Supabase by the user.
