@@ -136,6 +136,8 @@ export default function CountBinPage() {
             next[k] = { status: "correct", countedQty: "" };
           } else if (rec && (rec.lineType === "ADJUSTED" || rec.lineType === "ZERO")) {
             next[k] = { status: "wrong_closed", countedQty: String(rec.countedQty) };
+          } else if (json.recount && (l.PrevQty === null || l.PrevQty === undefined)) {
+            next[k] = { status: "wrong", countedQty: "" }; // nothing to confirm — type the count
           } else {
             next[k] = { status: "unanswered", countedQty: "" };
           }
@@ -267,7 +269,7 @@ export default function CountBinPage() {
       if (e.status === "unanswered") {
         if (data.recount) {
           // a recount is finished only when every focus line is answered
-          setError(`Please answer ${l.Mat} (${l.Batch}) — Correct or Wrong.`);
+          setError(`Please answer ${l.Mat} (${l.Batch}) — Correct or Wrong, or enter the quantity.`);
           return null;
         }
         continue; // not answered yet — leave for later
@@ -460,7 +462,9 @@ export default function CountBinPage() {
                 <>
                   <div className="card-row"><span>Mat</span><b>{l.mat}{l.matName ? ` — ${l.matName}` : ""}</b></div>
                   <div className="card-row"><span>Batch</span><b>{l.batch || "—"}</b></div>
-                  <div className="card-row"><span>Expected</span><b>{l.expectedQty === "" ? "—" : <>{l.expectedQty} <UomText uom={l.uom} /></>}</b></div>
+                  {!data?.recount && (
+                    <div className="card-row"><span>Expected</span><b>{l.expectedQty === "" ? "—" : <>{l.expectedQty} <UomText uom={l.uom} /></>}</b></div>
+                  )}
                   {l.prevRound && (
                     <div className="card-row">
                       <span>{l.prevRound}</span>
@@ -555,7 +559,8 @@ export default function CountBinPage() {
           {data?.recount && (
             <div className="banner banner-info">
               {data.roundLabel} — recount of the focus SKU{data.focusSkus.length === 1 ? "" : "s"} only. Check the
-              earlier count: <b>Correct</b> keeps it, <b>Wrong</b> lets you enter the new actual. Item not found? Enter 0.
+              earlier count: <b>Correct</b> keeps it, <b>Wrong</b> lets you enter the new actual. A line the earlier count did not cover:
+              just enter the quantity. Item not found? Enter 0.
             </div>
           )}
           {data?.recount && data.focusSkus.length > 1 && (
@@ -586,10 +591,12 @@ export default function CountBinPage() {
               <div className="card" key={k}>
                 <div className="card-row"><span>Mat</span><b>{l.Mat} — {l.MatName}</b></div>
                 <div className="card-row"><span>Batch</span><b>{l.Batch}</b></div>
-                <div className="card-row">
-                  <span>Master Qty</span>
-                  <b>{l.Qty === null ? "— (not in Master)" : <>{l.Qty} <UomText uom={l.UOM} /></>}</b>
-                </div>
+                {!data.recount && (
+                  <div className="card-row">
+                    <span>Master Qty</span>
+                    <b>{l.Qty === null ? "— (not in Master)" : <>{l.Qty} <UomText uom={l.UOM} /></>}</b>
+                  </div>
+                )}
                 {data.recount && (
                   <div className="card-row">
                     <span>{l.PrevRound || "Earlier count"}</span>
@@ -665,9 +672,11 @@ export default function CountBinPage() {
                     <button className="btn btn-warn btn-sm" onClick={() => markNotFound(k)}>
                       No Product
                     </button>
-                    <button className="btn btn-secondary btn-sm" onClick={() => undoAnswer(k)}>
-                      Cancel
-                    </button>
+                    {!(data.recount && (l.PrevQty === null || l.PrevQty === undefined)) && (
+                      <button className="btn btn-secondary btn-sm" onClick={() => undoAnswer(k)}>
+                        Cancel
+                      </button>
+                    )}
                   </div>
                 )}
 
