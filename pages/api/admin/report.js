@@ -6,7 +6,7 @@ import { buildWmsExport, WMS_COLUMNS, stampForFilename } from "../../../lib/wmsE
 
 // GET /api/admin/report?eventId=...&includePrecount=1&format=csv
 // GET /api/admin/report?eventId=...&format=wms          WMS YEAR_COUNT_RESULT layout (.xlsx)
-//      &wmsPiOrderNo=PD...&plant=1102&countDate=YYYYMMDD&onlyDifferences=1
+//      &plant=1102&countDate=YYYYMMDD&onlyDifferences=1
 // GET /api/admin/report?eventId=...&format=wms-preview  the same rows as JSON (+ warnings)
 async function handler(req, res) {
   if (req.method !== "GET") return res.status(405).json({ error: "Method not allowed" });
@@ -17,7 +17,6 @@ async function handler(req, res) {
     if (format === "wms" || format === "wms-preview") {
       const out = await buildWmsExport(eventId, {
         includePrecount,
-        wmsPiOrderNo: String(req.query.wmsPiOrderNo || "").trim(),
         plant: String(req.query.plant || "1102").trim() || "1102",
         countDate: String(req.query.countDate || "").trim(),
         onlyDifferences: req.query.onlyDifferences === "1",

@@ -57,13 +57,12 @@ function ReportPage() {
   const s = data?.summary;
 
   // ---- export in the WMS layout (YEAR_COUNT_RESULT_CR_EXPORT) ----
-  const [wmsOrder, setWmsOrder] = useState("");
   const [wmsPlant, setWmsPlant] = useState("1102");
   const [wmsDate, setWmsDate] = useState(""); // YYYYMMDD, empty = date of the latest count
   const [wmsOnlyDiff, setWmsOnlyDiff] = useState(false);
   const [wmsPreview, setWmsPreview] = useState(null);
   const wmsQuery = () =>
-    `eventId=${eventId}&includePrecount=${includePrecount ? 1 : 0}&wmsPiOrderNo=${encodeURIComponent(wmsOrder)}` +
+    `eventId=${eventId}&includePrecount=${includePrecount ? 1 : 0}` +
     `&plant=${encodeURIComponent(wmsPlant)}&countDate=${encodeURIComponent(wmsDate)}&onlyDifferences=${wmsOnlyDiff ? 1 : 0}`;
   async function previewWms() {
     setError("");
@@ -148,16 +147,13 @@ function ReportPage() {
       </div>
 
       <div className="card" style={{ marginTop: 16 }}>
-        <div className="card-title">Export in WMS format (YEAR_COUNT_RESULT_CR_EXPORT .xlsx)</div>
+        <div className="card-title">SAP report format (YEAR_COUNT_RESULT_CR_EXPORT .xlsx)</div>
         <div className="card-subtext">
-          One row per Material + Batch (counted lines only, summed over bins) in the layout of the WMS count-result
-          file, plus a last column <b>PI Doc</b>. Uses the same Pre-Count setting as above.
+          One row per Bin + Material + Batch (counted lines only) of the Event selected above, in the layout of the
+          WMS count-result file. <b>wmsPiOrderNo</b> = our PI Doc; extra last columns: <b>Bin Location</b>,{" "}
+          <b>Team</b>, <b>Round</b>. Uses the same Pre-Count setting as above.
         </div>
         <div className="field-row">
-          <div className="field">
-            <label>wmsPiOrderNo</label>
-            <input value={wmsOrder} onChange={(e) => setWmsOrder(e.target.value)} placeholder="e.g. PD26091700000103" />
-          </div>
           <div className="field">
             <label>Plant</label>
             <input value={wmsPlant} onChange={(e) => setWmsPlant(e.target.value)} />
@@ -198,7 +194,7 @@ function ReportPage() {
             ))}
             {wmsPreview.rows.slice(0, 5).map((r, i) => (
               <div key={i} style={{ fontFamily: "monospace", fontSize: 12 }}>
-                {r.storageLocation} · {r.material} · {r.batch} · count {r["Count QTY"]} · WMS {r["WMS QTY"]} · diff {r.Diff} ·{" "}
+                {r.wmsPiOrderNo} · {r["Bin Location"]} · {r.Team} · {r.Round} · {r.material} · {r.batch} · count {r["Count QTY"]} · WMS {r["WMS QTY"]} · diff {r.Diff} ·{" "}
                 {r["Is Difference"]}
               </div>
             ))}
