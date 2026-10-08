@@ -22,7 +22,7 @@ export default function ScanPage() {
   useEffect(() => {
     // Keep focus on the scan field so the PDA's built-in scanner
     // (keystroke/keyboard-wedge mode) can type into it.
-    inputRef.current?.focus();
+    inputRef.current?.focus({ preventScroll: true });
   });
 
   useEffect(() => {
@@ -68,7 +68,11 @@ export default function ScanPage() {
           value={binInput}
           onChange={(e) => setBinInput(e.target.value)}
           onKeyDown={handleKeyDown}
-          onBlur={() => inputRef.current?.focus()}
+          onBlur={(e) => {
+            // keep the scanner field focused, but not when a button was pressed (refocusing
+            // scrolls the page, the button moves away from the mouse and the click is lost)
+            if (!e.relatedTarget) inputRef.current?.focus({ preventScroll: true });
+          }}
           placeholder="Scan or type Bin code, then Enter"
           autoFocus
         />

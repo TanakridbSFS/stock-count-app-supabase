@@ -48,7 +48,7 @@ export default function JoinPiDocPage() {
   }, [session?.counterName]);
 
   useEffect(() => {
-    inputRef.current?.focus();
+    inputRef.current?.focus({ preventScroll: true });
   });
 
   function choose(d) {
@@ -89,7 +89,11 @@ export default function JoinPiDocPage() {
               submitCode();
             }
           }}
-          onBlur={() => inputRef.current?.focus()}
+          onBlur={(e) => {
+            // keep the scanner field focused, but not when a button was pressed (refocusing
+            // scrolls the page, the button moves away from the mouse and the click is lost)
+            if (!e.relatedTarget) inputRef.current?.focus({ preventScroll: true });
+          }}
           placeholder="Scan or type PI Doc no., then Enter"
           autoFocus
         />
