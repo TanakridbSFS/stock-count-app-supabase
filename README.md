@@ -1,19 +1,42 @@
 # Stock Count Web App (PDA)
 
-Cycle-count web app for Android handheld PDA devices. Scan a Bin, confirm or
-adjust each expected line, log any unexpected stock, save, move to the next
-bin. Data lives in **Supabase (Postgres)** — this repo previously used two
-Google Sheets instead; see §6 for why and what changed.
+Cycle-count / year-end stock-count web app for Android handheld PDA devices
+and an office Admin Console. A team scans its Team QR, takes a **PI Doc**
+(a set of Bins), scans each Bin, confirms or adjusts every expected line,
+logs unexpected stock, saves, and moves on. Data lives in **Supabase
+(Postgres)**; the app is Next.js (pages router) hosted on **Vercel**.
 
-## 1. Supabase setup
+Status: v2 (Stocktake Events / Rounds / PI Docs / Teams) is the live flow.
+The old "Run" flow (§9) is kept only so old data still reads.
+
+## 1. Concepts
+
+| Term | Meaning |
+|---|---|
+| **Stocktake Event** | One stock count (e.g. the year-end count). Holds the uploaded stock export (Bin Master) and the Bin Location Master. |
+| **Warehouse Area tag** | Each Warehouse Area of an event is tagged `PRECOUNT`, `COUNT` or `EXCLUDED`. Defaults live in `area_classification_defaults`. |
+| **Round** | `PRECOUNT#1`, then `COUNT#1`, `COUNT#2` ... Only one round of one event can be `ACTIVE` at a time (activating is refused while another event has an active round). |
+| **PI Doc** | A numbered work package of Bins given to one team. PI Doc numbers are unique **inside an event** (the same numbers may be used in another event). |
+| **Team** | `Team01`..; each has a QR code and permanent capabilities: SAP Storage Locations x area types (Picking / Reserve). |
+| **Auto-assign** | Per round toggle. An idle active team is given the next suitable PI Doc (stays in its area, spreads away from other teams, G-Floor PI Docs last). |
+| **G-Floor** | PI Docs holding a G-level Bin (`...-G`) of a F001 Reserve area. Only a flag: counted last, by any Picking or Reserve team of F001. |
+| **Inventory Status** | `UR` / `Block` / `QI` of a stock line. A count line answers one status of the Master; new lines get a status automatically (Count: UR; Pre-Count in a Blocked area: Block). SAP stock type: UR=1, QI=2, Block=4. |
+
+Round types:
+
+- **Pre-Count** - every PRECOUNT-tagged Bin, PI Docs generated automatically (1 Bin each).
+- **Count#1** - every COUNT-tagged Bin; PI Docs come from an uploaded file (columns `Location`, `PI Doc No.`).
+- **Count#2+** - recount of the SKUs the admin enters; PI Docs are generated automatically from the Bins that hold those SKUs (Picking 5 Bins, Reserve 15, pigeon-hole 24 per PI Doc) and the Master quantity is hidden on the PDA.
+
+## 2. Supabase setup
 
 You need one Supabase project (create it at
 [supabase.com](https://supabase.com/dashboard) if you haven't already).
 
-### 1.1 Schema
+### 2.1 Base schema
 
-Run this once in the Supabase SQL Editor (dashboard → SQL Editor → paste →
-Run) to create the tables this app expects:
+Run this once in the Supabase SQL Editor (dashboard -> SQL Editor -> paste ->
+Run) to create the base tables:
 
 ```sql
 create extension if not exists "pgcrypto";
@@ -82,24 +105,34 @@ create index if not exists idx_count_records_run_bin_ts
   on count_records (run_id, bin, ts desc);
 ```
 
-### 1.1.1 v2 schema (Stocktake Events / Rounds / PI Docs / Teams)
+### 2.2 Migrations
 
-Apply `migrations/001_stocktake_v2.sql` in the SQL Editor after §1.1. It is
-additive (the tables above are unchanged). See `REQUIREMENTS_v2.md` for the
-concept. Admin pages for it: `/admin/events` (upload stock export + Bin
-Location Master, tag Warehouse Areas) and `/admin/teams` (Team01-58, QR
-codes, Picking/Reserve capability per storage location). All `/admin/*`
-pages and `/api/admin/*` routes require the admin name + passcode (session
-cookie, 12h).
+Then run the files in `migrations/` **in order**, each once, in the SQL
+Editor. They are additive. When a migration is listed as "before deploy", run
+it **before** deploying the code that goes with it.
 
-### 1.2 API credentials
+| File | What it adds |
+|---|---|
+| `001_stocktake_v2.sql` | Stocktake events, bin locations, area classification, rounds, PI Docs, PI Doc bins, teams, team capabilities |
+| `002_count_records_round.sql` | `count_records` can belong to a round instead of an old Run |
+| `003_area_classification_defaults.sql` | Default tag per Warehouse Area |
+| `004_team_area_capabilities.sql`, `005_team_capabilities_two_dimensions.sql` | Team capabilities: Storage Locations x Picking/Reserve |
+| `006_auto_assign_and_recount_skus.sql` | Auto-assign toggle, Count#2+ SKU list, `pi_doc_progress` function |
+| `007_auto_assign_claim.sql` | `auto_assign_claim`: a team can never be given two PI Docs by overlapping runs |
+| `008_pi_doc_per_event_and_g_floor.sql` | PI Doc numbers unique per event (`pi_docs.stocktake_event_id`), `pi_docs.g_floor` flag |
+| `009_inventory_status.sql` | `count_records.inventory_status` (UR / Block / QI) |
 
-Dashboard → Settings → API. You need:
+### 2.3 API credentials
+
+Dashboard -> Settings -> API. You need:
 - **Project URL** (`https://xxxxx.supabase.co`)
-- **Secret (`service_role`) key** — full read/write, server-side only.
+- **Secret (`service_role`) key** - full read/write, server-side only.
   **Never** expose this to the browser or commit it to git.
 
-## 2. Local setup
+Note: Supabase returns at most 1,000 rows per request, so server code reads
+large tables page by page (`order` + `range`).
+
+## 3. Local setup
 
 ```bash
 npm install
@@ -107,145 +140,66 @@ cp .env.example .env.local
 ```
 
 Edit `.env.local`:
-- `SUPABASE_URL` — your project URL
-- `SUPABASE_SECRET_KEY` — your secret key from §1.2
-
-Run it:
+- `SUPABASE_URL` - your project URL
+- `SUPABASE_SECRET_KEY` - your secret key from §2.3
 
 ```bash
-npm run dev
+npm run dev      # http://localhost:3000
+npm run build    # production build check
 ```
 
-Open `http://localhost:3000` on a computer first to sanity-check the flow,
-then try it from the PDA's browser once deployed (see below) — the
-PDA's scanner won't be exercised until you're testing on the real device.
+Try the flow on a computer first, then on the PDA's browser once deployed
+(the PDA's scanner is only exercised on the real device).
 
-## 3. Deploy to Vercel
+## 4. Deploy to Vercel
 
-1. Push this project to a GitHub repo.
-2. In Vercel, "Add New Project" → import that repo.
-3. In the project's Settings → Environment Variables, add `SUPABASE_URL`
-   and `SUPABASE_SECRET_KEY` from your `.env.local`.
-4. Deploy. Open the resulting `*.vercel.app` URL on the PDA's browser.
-5. On the PDA, add the URL to the home screen (browser menu → "Add to Home
-   screen") so it opens like an app.
+1. Push this project to a GitHub repo (`main`).
+2. In Vercel, "Add New Project" -> import that repo.
+3. Settings -> Environment Variables: add `SUPABASE_URL` and `SUPABASE_SECRET_KEY`.
+4. Deploy. `vercel.json` pins the functions to region `hnd1` (Tokyo) and allows 60 s for the legacy Run upload.
+5. On the PDA, open the `*.vercel.app` URL and add it to the home screen (browser menu -> "Add to Home screen").
 
-## 3.1 v2 workflow (Stocktake Events) - supersedes §4 and the Run parts of §5
+Pushing to `main` redeploys automatically. Remember to run any new
+migration **before** pushing code that needs it.
 
-1. Apply `migrations/001_stocktake_v2.sql` then `migrations/002_count_records_round.sql` (SQL Editor).
-2. `/admin` -> sign in (name + passcode) -> **Teams**: create Team01-Team58, tick Picking/Reserve per storage location, print QR codes.
-3. **Stocktake Events**: upload the stock export + Bin Location Master, then tag each Warehouse Area PRECOUNT / COUNT / EXCLUDED.
-4. **Control**: create a Pre-Count round (auto PI Docs) and/or Count#1 (upload the PI Doc file: columns Location + PI Doc No.). Later recounts: enter SKUs -> Count#2, #3 ... PI Docs are auto-generated.
-5. **PI Docs**: assign each PI Doc to one team (warns if the team lacks the Picking/Reserve capability), then **Activate** the round. Activating closes the other round in the same lane.
-6. PDA: scan Team QR -> pick/scan a PI Doc -> scan bins -> count (existing screens).
-7. **Progress** (Team x PI Doc) and **Consolidated Report** (latest round wins per Bin+Mat+Batch, optional Pre-Count, CSV).
+## 5. Count-day workflow
 
-The old Run flow (`§4`, Run barcode on `/join`) no longer exists in the UI. The 3D Dashboard and Count Result pages still read old Run data.
+1. **Admin Console** (`/admin`) - sign in with admin name + passcode (session cookie, 12 h). All `/admin/*` pages and `/api/admin/*` routes need it. The passcode is a speed bump, hard-coded in `lib/adminAuth.js`.
+2. **System Setting**
+   - *Teams & capabilities* (`/admin/teams`): create the teams, tick Storage Locations and Picking/Reserve, print QR codes.
+   - *Warehouse Area default tags* (`/admin/area-defaults`).
+3. **Count Round Setting**
+   - *Stocktake Event & area tags* (`/admin/events`): create the event, upload the stock export (Bin Master, the raw 16-column WMS export) and the Bin Location Master, adjust the tags.
+   - *Rounds* (`/admin/control`): create Pre-Count, Count#1 (upload the PI Doc file; warns about G-Floor PI Docs that mix G Bins with other Bins), then Count#2+ by SKU list.
+   - *Assign PI Docs* (`/admin/pidocs`): assign by hand (warns if the team lacks the capability) or turn **Auto-assign** on; **Activate** the round.
+4. **PDA** - scan the Team QR -> take / scan a PI Doc -> scan Bins -> count (§6).
+5. **Monitor & Report**
+   - *Progress* (`/admin/progress`): Team x PI Doc, per Storage Location tab, time on the current PI Doc.
+   - *TV Progress* (`/admin/tv`): one-screen view for a monitor (tabs All / F001 / C001 / C002 / D001, team cards, idle teams, Top 5 fastest and Top 10 slowest average time per Bin, Light/Dark, refreshes every 30 s).
+   - *Timing* (`/admin/timing`): time per Bin / PI Doc / team / area, Bins per hour (breaks longer than N minutes left out), CSV of the PI Doc table.
+   - *Consolidated report* (`/admin/report`): see §7.
+   - *Live 3D dashboard* (`/dashboard`): see §8.
 
-## 4. Run Setup (`/admin/runs`) — start here for a new cycle count
+## 6. PDA counting screen
 
-Each cycle-count round is a **Run** — a named batch tying together one
-uploaded master file and one barcode for PDAs to join:
+- Scan fields (Team, PI Doc, Bin, Mat, Batch, Qty) keep the cursor but do **not** open the on-screen keyboard (the PDA scanner types and sends Enter). A small keyboard button next to the field opens it when typing is needed.
+- Bins in a PI Doc are listed in natural order (`FA-99-H` before `FA-105-H`).
+- Each expected line has **Correct** (saves the expected quantity) or **Wrong** (type the real quantity; `0` is a valid answer). Each line carries its **Inventory Status** badge (UR / Block / QI) - the same Mat + Batch can appear once per status.
+- A Bin with no expected lines shows **Confirm - Nothing Found** (saves one `EMPTY` record).
+- **+ Add New Line** for unexpected stock:
+  - Mat: exactly 8 digits, required. Batch: digits only, required, padded with leading zeros to 10, more than 10 digits is refused. The message appears at the field. A `Mat|Batch|Qty` combined barcode fills the fields at once.
+  - UOM is read-only, taken from `lib/materialUom.json` (from `Master_UOM.xlsx`); a Mat that is not in the list is blocked.
+  - Quantity is never negative; any number of decimals can be typed.
+  - The status of a new line is set automatically (Count: UR; Pre-Count in a Blocked area: Block, otherwise UR).
+  - Two new lines with the same Mat + Batch + status are added together on save.
+- Count#2+: the Master quantity is hidden; the screen shows the earlier count and a CONFIRMED / CHANGED tag.
+- On a Bin's last page, **Review & Finish Bin** shows a summary; nothing is saved until **Confirm & Save**. One result per Bin per round: saving replaces the earlier record of the same Mat + Batch + status.
+- Timestamps are written and shown in Thai time (UTC+7, `lib/time.js`); Supabase stores UTC.
 
-1. Go to `/admin/runs`.
-2. Enter a **Run Name** (e.g. `Run001_17Oct2026`) and **Your Name**.
-3. Upload the raw WMS export — `PHYSICAL_INVENTORY_EXPORT_*.xlsx`, all 16
-   columns as exported (Owner, Owner Code, SKU Code, SKU Name, Inventory
-   Status, ERP Batch Number, Total quantity, Occupied Qty., Available
-   Qty., Basic UOM, Warehouse area code, Location Type, Container Code,
-   Bin-location Code, Manufacturing Date, Expiration Date) — no manual
-   conversion needed.
-4. Click **Create Run**. The server parses the file, stores every raw row
-   in `bin_master_raw`, and generates a QR barcode encoding a short code
-   (`RUN-XXXXXXXX`).
-5. Print or display that barcode. Each PDA scans it once, on the `/join`
-   screen (see §5), before it can scan any bins.
+### Updating the Material -> UOM list
 
-Grouping (drop `Location Type = CONTAINER` rows — picking totes, not real
-bins — then group by Container Code + SKU Code + ERP Batch Number + Basic
-UOM, summing `Total quantity`) happens on every read, in `lib/db.js`,
-mirroring what `lib/binMasterConvert.js` used to do against the Google
-Sheet. `Batch` is always re-padded to a 10-digit text code (e.g. `9` →
-`0000000009`) so a value never loses its leading zeros, whether it came
-from the export or was typed by hand on "+ Add New Line".
-
-Existing runs and their barcodes are listed further down the same page.
-Multiple runs can exist at once (e.g. re-scanning after a discrepancy, or
-running Frozen/Chilled/Dry as separate rounds) — nothing overwrites a
-previous run's data.
-
-## 5. How it works
-
-- **Start** (`/`) — counter types their name only (no username/password
-  login). Stored on-device (`localStorage`) so it survives closing the
-  browser.
-- **Join a Run** (`/join`) — scan the Run barcode from §4. This attaches
-  the device to that Run for every subsequent bin/count until a different
-  barcode is scanned ("Change Run" on `/scan`).
-- **Scan Bin** (`/scan`) — a text field stays focused; the PDA's built-in
-  scanner types the Bin code into it and sends Enter automatically
-  (keyboard-wedge mode — no extra scanner setup needed).
-- **Confirm/Adjust** (`/count/[bin]`) — shows expected lines for that bin
-  (paginated — 20/50/100/500/1000 per page, since some bins have 1,000+
-  lines). Wherever a UOM of **`KG`** is shown on this screen it's
-  highlighted in yellow — it's the easiest unit to miscount by hand on a
-  scale reading, so it's meant to catch the eye while scanning. Each line
-  starts with two buttons: **✓ Correct** (matches — no
-  typing needed, saves the expected quantity as-is) or **✕ Wrong** (reveals a
-  quantity field). After typing the actual quantity for a "Wrong" line, tap
-  **Confirm** (or just press Enter in the field — the PDA scanner's
-  auto-Enter does this for you) to close it into a short summary badge
-  (`ADJUSTED — 45 KG` / `ZERO — 0 KG`), with an "Edit" button to reopen it
-  without retyping if you need to correct the number. A "No Product"
-  shortcut closes the box immediately with 0 (since a wrong line always
-  gets *some* number logged, never just deleted, and 0 is already a
-  definitive answer — no need to tap "Confirm" separately). None of this is
-  saved yet — it only updates the on-screen state, the same as
-  "Correct" — the actual save still only happens at "Review & Finish Bin" /
-  "Confirm & Save" below. If the bin has **no expected items at all** in
-  this Run's master data, it shows a "✓ Confirm — Nothing Found" button
-  instead — logs a single `EMPTY` record for the bin (so "checked, nothing
-  here" is captured properly, instead of forcing a fake New Line just to
-  get past validation); "+ Add New Line" still works normally if stock
-  actually turns up there. Unexpected stock goes in via "+ Add New Line" —
-  typing a Mat code there auto-fills its UOM from `lib/materialUom.json`
-  (bundled in the repo, converted from your `Master_UOM.xlsx`) shown
-  read-only with an "Override" button, in case that's ever wrong; a Mat
-  that isn't in that list falls back to the manual dropdown (the 15 units
-  in `lib/uomOptions.js`) instead. See "Updating the Material→UOM list"
-  below for how to refresh it. Existing lines keep the master file's UOM
-  as-is, unaffected by any of this. Its Mat/Batch fields also treat Enter
-  as "move to the next field" (Mat → Batch → Counted Qty, skipping the UOM
-  dropdown since that's chosen by hand, not scanned), matching how the
-  Bin-scan field already uses Enter to jump straight into a bin. Some PDA
-  barcodes encode `SKU|Batch|Qty` in one scan instead of two separate
-  SKU-only / Batch-only barcodes — scanning one of those into either Mat
-  or Batch splits it and fills both fields at once (never Qty — that's
-  still typed in by hand from the actual count), then jumps straight to
-  Counted Qty instead of stopping at Batch. A plain single-value scan (no
-  `|`) still only fills whichever field it landed in, same as before. If
-  the bin already has a count record from earlier *today, in this Run*,
-  it warns before letting you recount (see §7). On a bin's last page,
-  "Save & Next Page" becomes **"Review & Finish Bin"** instead of saving
-  right away — it shows a summary of every line about to be written (Mat,
-  Batch, Expected vs. Counted, MATCH/ADJUSTED/ZERO/NEW/EMPTY) with a
-  "Confirm & Save" button to actually submit, or "Back to Edit" to change
-  something first. Nothing on that last page is saved until confirmed
-  there. (Earlier pages of a large, paginated bin still save immediately
-  on "Save & Next Page" — the summary step is only for the final page,
-  right before moving to the next bin.)
-- Every save **appends** a row to `count_records` — nothing is ever
-  overwritten.
-
-### 5.1 Updating the Material→UOM list
-
-`lib/materialUom.json` is a plain `{ "matCode": "UOM", ... }` map, generated
-once from your `Master_UOM.xlsx` (`Material` + `Base Unit of Measure`
-columns) — it's a static file in the repo, not read from Supabase, so it
-needs no extra env var and doesn't get re-checked on every request.
-
-Since this list only changes rarely, there's no in-app upload for it —
-just send an updated `Master_UOM.xlsx` and regenerate the JSON:
+`lib/materialUom.json` is a static `{ "matCode": "UOM" }` map generated from
+`Master_UOM.xlsx` (`Material` and `Base Unit of Measure` columns). To refresh:
 
 ```bash
 python3 -c "
@@ -260,104 +214,55 @@ json.dump(mapping, open('lib/materialUom.json', 'w'), separators=(',', ':'), sor
 "
 ```
 
-Then commit `lib/materialUom.json` and redeploy — same as any other code
-change. A Mat code missing from this file just falls back to the manual
-UOM dropdown, so it's safe if the list is a little out of date.
+Commit the file and redeploy.
 
-## 6. Admin Console (`/admin`)
+## 7. Reports and SAP export
 
-A small office-use page, separate from the PDA counting flow:
+`/admin/report` has a **report type** dropdown: `--Select--` (nothing loads),
+**Count + Pre-Count**, **Count**, **Pre-Count**. The choice applies to the
+table, the CSV and the SAP file, and appears in the file names.
 
-- **Export Count Records** — pick a **Run**, then a date (or "All dates"),
-  and download that Run's raw `count_records` log as a CSV.
+- **Consolidated report** - latest round wins per Bin + Mat + Batch + Inventory Status; columns include Inventory Status and "vs Earlier Count". Quantities are shown rounded to 3 decimals (`5.000`).
+- **CSV** - `ConsolidatedReport_<type>.csv`.
+- **SAP / WMS format** (`.xlsx`, `YEAR_COUNT_RESULT_CR_EXPORT_<type>_<stamp>.xlsx`) - one row per Bin + Mat + Batch + Status; PI Doc as order number, plus Bin Location, Team and Round columns. Stock type: UR=1, QI=2, Block=4. Quantity cells use 3 decimals.
+- Expected lines are built from `bin_master_raw`, grouped per Container + SKU + padded Batch (blank = `0000000000`) + UOM + status, excluding `Location Type = CONTAINER` rows (picking totes); this matches the `bin_master_grouped` view.
 
-No passcode gate — by your call, since this only ever *reads* data. If
-this page ever grows a feature that writes data, revisit that call.
-
-Master-file uploads and Run creation live at `/admin/runs` (§4), not here.
-
-## 7. Known simplifications
-
-- "Already counted" is scoped to **(Run, Bin, today)** — if a Bin already
-  has a count record from earlier today *in the currently joined Run*, the
-  app warns before letting anyone recount it that same day. A different
-  day, or a different Run, counts it again freely, no warning. Two PDAs
-  both counting the same bin, same day, same Run is what this catches.
-- It also does not currently track partial progress within a large bin's
-  pages — if interrupted partway through a big bin, re-opening it later
-  today (in the same Run) will show the "already counted today" warning
-  (since a row exists from page 1), and resuming means overriding and
-  paging forward, which is safe since earlier pages just don't need
-  re-saving.
-- No variance/reconciliation report is built — `count_records` is the raw
-  log; analysis happens outside the app (or via `/count-result`, §9, for
-  a simple Expected/Actual/Diff rollup).
-- Timestamps are always written and displayed in Thai local time (UTC+7,
-  `lib/time.js`) — Supabase itself stores and returns them in UTC
-  (`timestamptz`), so every read converts back to Thai time before any
-  "is this today" logic runs; keep that in mind if you ever query
-  `count_records` directly in the SQL Editor.
+Count records written before migration 009 have no status and are read as UR.
 
 ## 8. Live 3D Warehouse Dashboard (`/dashboard`)
 
-A separate, read-only view for the office — walk-through-the-warehouse-style
-3D map of the **entire Frozen zone, all 9 racks** (rendered with
-[three.js](https://threejs.org/), mouse/touch to rotate/zoom/pan/drag),
-colored per bin by its most recent count status for the selected **Run**
-(`MATCH`/`ADJUSTED`/`ZERO`/`NEW`/`EMPTY`, or grey for `UNCOUNTED`). A
-dropdown lets you switch which Run is shown. Polls `/api/dashboard/bins`
-every **60 seconds** so it stays current while left open on a screen, plus
-a manual **⟳ Force Refresh** button. Hover a cube for its Bin code,
-status, counted qty, who counted it, and when. The camera auto-frames the
-whole layout on load, so it fits a normal laptop screen without any extra
-setup.
+Read-only view of the Frozen zone (9 racks, [three.js](https://threejs.org/)),
+each Bin colored by its latest count status (`MATCH` / `ADJUSTED` / `ZERO` /
+`NEW` / `EMPTY`, grey = uncounted) for the selected Run. Refreshes every 60 s
+plus a manual button. Bin coordinates are precomputed in
+`lib/warehouseLayout.json` from the Bin Location export (`<Aisle>-<Position>-<Layer>`;
+racks `FJ FH FG FF FE FD FC FB FA`; level letters `A`=1, `G`=2, `H`=3, `J`=4;
+racks FH and FJ split level 1 into 6 sub-slots `AA`..`AF`). Regenerate the
+file from a new Bin Location export if the layout changes.
 
-Bin coordinates are precomputed once into `lib/warehouseLayout.json` (a
-static file, generated from the real bin-location export,
-`WMS_PRD_binLocation_*.xlsx`) and joined against live `count_records` data
-by `pages/api/dashboard/bins.js` on every request. Layout logic per bin
-code (`<Aisle>-<Position>-<Layer>`, e.g. `FA-02-A`):
+## 9. Legacy Run flow
 
-- **Rack** (`FA`–`FJ`, 9 racks) → a Z-axis lane, in the confirmed physical
-  order **FJ FH FG FF FE FD FC FB FA** (right to left, facing into the
-  warehouse).
-- **Position** → depth down the aisle (`depth = ceil(position/2)`) and
-  which of the rack's two faces (`side`: odd = right, even = left).
-- **Layer letter** → shelf level: `A`→1, `G`→2, `H`→3, `J`→4 — except
-  racks **FH and FJ**, whose level-1 shelf is physically split into 6
-  smaller sub-slots (`AA`–`AF` instead of a single `A`); those render as 6
-  thin stacked boxes filling that one level-1 slot rather than one cube.
+The v2 flow replaces it, but these still exist for old data:
 
-To regenerate `lib/warehouseLayout.json` (e.g. a new bin-location export,
-or a layout change), re-run the same conversion against the new file: parse
-`code`, restrict to the `FA`–`FJ` aisles, compute `depth`/`side`/`level` as
-above, and assign `rackIndex` from the `FJ FH FG FF FE FD FC FB FA` order.
+- `/admin/runs` - create a **Run** from a raw WMS export (stored in `bin_master_raw`, short barcode `RUN-XXXXXXXX`). Runs are not part of the v2 PDA flow any more.
+- `/count-result` - Mat + Batch -> Expected / Actual / Diff rollup of a Run, with zone, search and diff filters.
+- `/api/admin/export` - raw `count_records` CSV of a Run.
+- Run records keep `run_id`; v2 records set `count_round_id` and leave `run_id` null (migration 002).
 
-## 9. Count Result (`/count-result`)
+## 10. Project layout
 
-A rollup table for the office — **Mat + Batch → Expected / Actual / Diff**,
-deliberately ignoring Bin Location (a material can be expected/counted
-across many bins; this page answers "did we find it all", not "where").
-A dropdown at the top-right selects which **Run** to roll up. Backed by
-`/api/count-result?runId=...&zone=F|C|D|ALL`:
+| Path | Contents |
+|---|---|
+| `pages/` | Pages (PDA `/`, `/join`, `/scan`, `/count/[bin]`; `/admin/*`; `/dashboard`) and API routes under `pages/api/` |
+| `lib/` | Server logic: `db.js` (Supabase reads/writes), `rounds.js`, `piGen.js` (PI Doc generation), `autoAssign.js`, `capabilities.js`, `areaRules.js`, `report.js`, `wmsExport.js`, `validate.js`, `binSort.js`, `inventoryStatus.js`, `reportFormat.js` |
+| `components/` | `AdminGate`, `MultiSelect`, `ScanInput` |
+| `migrations/` | SQL migrations 001-009 (§2.2) |
+| `tools/` | `convert_export_to_binmaster.py` (old Google Sheets era converter) |
+| `JOURNEY.md` | Dated development log, test notes and decisions |
 
-- **Expected** = sum of that Run's master-file `Qty` for that Mat+Batch
-  (optionally restricted to bins in the selected zone).
-- **Actual** = sum of the **latest** count record per (Bin, Mat, Batch)
-  within that Run — so a recounted bin isn't double-counted — for that
-  Mat+Batch (`EMPTY` rows, which have no Mat, are excluded).
-- **Diff** = Actual − Expected.
+## 11. Known simplifications
 
-Filters sit right in the table header: a **zone dropdown** (All / F =
-Frozen / C = Chilled / D = Dry — the zone is just the Bin code's first
-letter, so this works for any zone without needing the 3D layout data), a
-**Mat/Batch/Name search box**, and a **Diff filter** (All / Match (ตรง) /
-Short (ขาด) / Over (เกิน)). Every column header is clickable to sort
-ascending/descending. Same refresh pattern as the Dashboard: auto-refreshes
-every 60 seconds, plus a manual **⟳ Force Refresh** button.
-
-## 10. Navigation
-
-The Start page (`/`) has two buttons below "Start Counting" linking to the
-Dashboard and Count Result pages, for office/desktop use — they're not part
-of the PDA counting flow itself (`/` → `/join` → `/scan` → `/count/[bin]`).
+- The admin passcode is hard-coded on purpose (a speed bump, not security); the session token is signed with the Supabase secret key.
+- The PDA PI Doc list also runs auto-assign as a safety net, so the first minutes of a count day with many teams logging in at once are the slowest (a load test with 59 simulated PDAs finished with 0 errors; the start burst took up to ~16 s on the PI Doc list).
+- "Already counted" for the legacy Run flow is scoped to (Run, Bin, today).
+- No reconciliation workflow is built in: reports come from `count_records`, and analysis beyond the report page happens outside the app.
