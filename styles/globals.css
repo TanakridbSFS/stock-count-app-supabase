@@ -313,9 +313,3 @@ button {
 
 /* version tag at the bottom of every page */
 .version-tag { text-align: center; font-size: 11px; color: #8a97a5; padding: 6px 8px 10px; }
-
-/* scan box at the top of the counting screen: always open, stays on screen while scrolling */
-.scan-panel { position: sticky; top: 0; z-index: 5; background: #fff; border: 2px solid #2563eb; border-radius: 10px; padding: 8px 10px 10px; margin-bottom: 12px; box-shadow: 0 2px 8px rgba(0,0,0,0.12); }
-.scan-panel-head { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 10px; font-size: 13px; color: #475467; }
-.scan-panel-head b { color: #1d4ed8; font-size: 15px; }
-.scan-panel-head .scan-count { margin-left: auto; font-weight: 700; color: #1d4ed8; }

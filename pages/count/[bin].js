@@ -78,10 +78,6 @@ function emptyNewLine() {
   };
 }
 
-// The scan box at the top of the screen is a new line that is always open (its _key never changes, so the
-// input keeps the cursor from one scan to the next).
-const freshPanel = () => ({ ...emptyNewLine(), _key: "panel" });
-
 // The unit of a new line: from Master_UOM, else the one picked by hand.
 const lineUom = (nl) => masterUomFor(nl.mat) || nl.uomPick || "";
 
@@ -131,8 +127,7 @@ export default function CountBinPage() {
   // editable state for existing master lines, keyed by a stable id built from the line's fields
   // status: 'unanswered' | 'correct' | 'wrong'
   const [edits, setEdits] = useState({});
-  const [newLines, setNewLines] = useState([]); // finished lines (and a finished line reopened for Edit)
-  const [panel, setPanel] = useState(() => freshPanel()); // the scan box at the top
+  const [newLines, setNewLines] = useState([]);
   const dirty = useRef(false); // the counter changed something on this bin (a draft is kept)
   const [draftInfo, setDraftInfo] = useState(null); // a draft was restored: { at }
   const comboTimer = useRef(null); // a combo barcode typed one character at a time is applied when it stops
@@ -223,7 +218,6 @@ export default function CountBinPage() {
         if (draft) {
           setEdits((prev) => ({ ...prev, ...(draft.edits || {}) }));
           setNewLines(Array.isArray(draft.newLines) ? draft.newLines : []);
-          setPanel(draft.panel && draft.panel._key === "panel" ? draft.panel : freshPanel());
           setConfirmedEmpty(!!draft.confirmedEmpty);
           dirty.current = true;
           setDraftInfo({ at: draft.savedAt });
@@ -245,19 +239,18 @@ export default function CountBinPage() {
     if (!dirty.current || !bin || !session?.piDocId) return;
     const t = setTimeout(() => {
       try {
-        localStorage.setItem(draftKey(session.piDocId, bin), JSON.stringify({ savedAt: Date.now(), edits, newLines, panel, confirmedEmpty }));
+        localStorage.setItem(draftKey(session.piDocId, bin), JSON.stringify({ savedAt: Date.now(), edits, newLines, confirmedEmpty }));
       } catch {}
     }, 300);
     return () => clearTimeout(t);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [edits, newLines, panel, confirmedEmpty]);
+  }, [edits, newLines, confirmedEmpty]);
 
   function discardDraft() {
     clearDraft(session.piDocId, bin);
     dirty.current = false;
     setDraftInfo(null);
     setEdits({});
-    setPanel(freshPanel());
     initialisedBin.current = null;
     load();
   }
@@ -298,51 +291,41 @@ export default function CountBinPage() {
     updateEdit(key, { status: "unanswered", countedQty: "" });
   }
 
-  // idx is the position in newLines, or "panel" for the scan box at the top
   function updateNewLine(idx, patch) {
     dirty.current = true;
-    if (idx === "panel") setPanel((p) => ({ ...p, ...patch }));
-    else setNewLines((prev) => prev.map((l, i) => (i === idx ? { ...l, ...patch } : l)));
+    setNewLines((prev) => prev.map((l, i) => (i === idx ? { ...l, ...patch } : l)));
   }
 
   function removeNewLine(idx) {
     dirty.current = true;
-    if (idx === "panel") setPanel(freshPanel());
-    else setNewLines((prev) => prev.filter((_, i) => i !== idx));
+    setNewLines((prev) => prev.filter((_, i) => i !== idx));
   }
 
-  function focusPanel(field) {
-    document.getElementById(`newline-panel-${field}`)?.focus({ preventScroll: true });
+  function focusAddButton() {
+    setTimeout(() => document.getElementById("add-new-line-btn")?.focus(), 60);
   }
 
-  // A finished line from the scan box goes into the list; the scan box is emptied but keeps the cursor
-  // (the same input stays on screen), so the next barcode can be scanned right away.
-  function commitFromPanel(fields) {
+  function addNewLine() {
     dirty.current = true;
-    setNewLines((prev) => [...prev, { ...emptyNewLine(), ...fields, editing: false }]);
-    setPanel(freshPanel());
-    setError("");
-    focusPanel("mat");
+    const line = emptyNewLine();
+    // Render now and give the Mat field the cursor inside the same tap: a field focused later by a timer is
+    // not "focused by the user", and with the keyboard kept away the PDA scanner's text does not reach it.
+    flushSync(() => setNewLines((prev) => [...prev, line]));
+    document.getElementById(`newline-${line._key}-mat`)?.focus({ preventScroll: true });
   }
 
   // A combo scan (Mat|Batch|Qty) lands in Mat or Batch: fill every field. With a Qty (and a unit known for the
-  // Mat) the line is complete: in the scan box it moves to the list and the box is ready for the next scan;
-  // otherwise go on to the next field.
+  // Mat) the line is complete: close it and put the cursor on "+ Add New Line"; otherwise go on to the next field.
   function applyCombo(idx, nl, combo) {
     const mat = digitsOnly(combo.mat);
     const known = !!masterUomFor(mat);
     const complete = combo.qty !== "" && known;
     const uom = masterUomFor(mat) || "";
+    updateNewLine(idx, { mat, batch: combo.batch, uom, ...(combo.qty !== "" ? { countedQty: combo.qty } : {}), ...(complete ? { editing: false } : {}) });
     if (complete) {
-      if (idx === "panel") {
-        commitFromPanel({ mat, batch: combo.batch, uom, uomPick: "", countedQty: combo.qty });
-      } else {
-        updateNewLine(idx, { mat, batch: combo.batch, uom, countedQty: combo.qty, editing: false });
-        setTimeout(() => document.getElementById("newline-panel-mat")?.focus({ preventScroll: true }), 60);
-      }
+      focusAddButton();
       return;
     }
-    updateNewLine(idx, { mat, batch: combo.batch, uom, ...(combo.qty !== "" ? { countedQty: combo.qty } : {}) });
     const next = !known && mat.length >= MAT_LENGTH ? "uom" : "qty";
     setTimeout(() => document.getElementById(`newline-${nl._key}-${next}`)?.focus({ preventScroll: true }), 60);
   }
@@ -372,7 +355,7 @@ export default function CountBinPage() {
 
   // "Done" / Enter on Counted Qty: close the line into its compact view.
   function finishLine(idx) {
-    const nl = idx === "panel" ? panel : newLines[idx];
+    const nl = newLines[idx];
     const bad = newLineError(nl);
     if (bad) {
       setError(bad);
@@ -380,9 +363,8 @@ export default function CountBinPage() {
       return;
     }
     setError("");
-    const done = { mat: nl.mat, batch: padBatch(nl.batch), uom: lineUom(nl), uomPick: nl.uomPick, countedQty: nl.countedQty };
-    if (idx === "panel") commitFromPanel(done);
-    else updateNewLine(idx, { ...done, editing: false });
+    updateNewLine(idx, { batch: padBatch(nl.batch), uom: lineUom(nl), editing: false });
+    focusAddButton();
   }
 
   // Builds + validates the list of lines that would be saved right now.
@@ -442,10 +424,6 @@ export default function CountBinPage() {
       });
     }
 
-    if (panel.mat || panel.batch || panel.countedQty) {
-      setError("มีรายการในช่องยิงด้านบนที่ยังไม่เสร็จ — กรอกให้ครบแล้วกด Done หรือกด Clear ก่อนบันทึก");
-      return null;
-    }
     for (const nl of newLines) {
       if (!nl.mat && !nl.batch && !nl.countedQty) continue; // skip totally blank rows
       const bad = newLineError(nl);
@@ -571,24 +549,19 @@ export default function CountBinPage() {
 
   if (!ready || !session || !session.piDocId) return null;
 
-  // The open form of a new line: the scan box at the top (idx "panel") or a finished line reopened for Edit.
-  function newLineForm(nl, idx, isPanel) {
+  // The open form of a new line (a new one, or a finished line reopened for Edit).
+  function newLineForm(nl, idx) {
     const masterUom = masterUomFor(nl.mat);
     const needUom = !masterUom && nl.mat.length >= MAT_LENGTH && !nl.mat.includes("|");
     return (
-      <div className={isPanel ? "scan-panel-form" : "card"} key={nl._key}>
-        {!isPanel && (
-          <>
-            <span className="badge badge-new">NEW</span> <StatusBadge status={nl.status || data?.newLineStatus} />
-          </>
-        )}
+      <div className="card" key={nl._key}>
+        <span className="badge badge-new">NEW</span> <StatusBadge status={nl.status || data?.newLineStatus} />
         <div className="field" style={{ marginTop: 8 }}>
           <label>Mat (ตัวเลข {MAT_LENGTH} หลัก)</label>
           <ScanInput
             id={`newline-${nl._key}-mat`}
             keyboard="numeric"
             pattern="[0-9]*"
-            autoFocus={isPanel}
             value={nl.mat}
             invalid={!!((!nl.mat.includes("|") && matError(nl.mat)) || nl.warnMat)}
             onChange={(e) => {
@@ -701,7 +674,7 @@ export default function CountBinPage() {
           Done
         </button>
         <button className="btn btn-secondary btn-sm" onClick={() => removeNewLine(idx)}>
-          {isPanel ? "Clear" : "Remove"}
+          Remove
         </button>
       </div>
     );
@@ -724,7 +697,7 @@ export default function CountBinPage() {
       )}
       {data?.blind && (
         <div className="banner banner-info">
-          Pre-Count — scan every item you find in this bin into the box below.
+          Pre-Count — add a new line for every item you find in this bin.
           {data.area ? ` Area ${data.area}: items are saved as ` : ""}
           {data.area && <StatusBadge status={data.newLineStatus} />}
         </div>
@@ -827,21 +800,8 @@ export default function CountBinPage() {
                 </div>
               )}
               <div style={{ fontSize: 13, color: "#666", marginTop: 8 }}>
-                Found stock anyway? Scan it into the box at the top.
+                Found stock anyway? Use "+ Add New Line" below instead.
               </div>
-            </div>
-          )}
-
-          {data && (
-            <div className="scan-panel">
-              <div className="scan-panel-head">
-                <b>Scan new item</b>
-                <span>
-                  Mat|Batch|Qty, or Mat → Batch → Qty · status <StatusBadge status={data.newLineStatus} />
-                </span>
-                <span className="scan-count">{newLines.length} added</span>
-              </div>
-              {newLineForm(panel, "panel", true)}
             </div>
           )}
 
@@ -1005,29 +965,30 @@ export default function CountBinPage() {
             );
           })}
 
-          {[...newLines]
-            .map((nl, idx) => ({ nl, idx }))
-            .reverse()
-            .map(({ nl, idx }) =>
-              nl.editing ? (
-                newLineForm(nl, idx, false)
-              ) : (
-                <div className="card" key={nl._key}>
-                  <span className="badge badge-new">NEW</span> <StatusBadge status={nl.status || data?.newLineStatus} />
-                  <div className="card-row"><span>Mat</span><b>{nl.mat}</b></div>
-                  <div className="card-row"><span>Batch</span><b>{padBatch(nl.batch) || "—"}</b></div>
-                  <div className="card-row"><span>Counted</span><b>{nl.countedQty} <UomText uom={lineUom(nl)} /></b></div>
-                  <div style={{ marginTop: 10 }}>
-                    <button className="btn btn-secondary btn-sm" onClick={() => updateNewLine(idx, { editing: true })}>
-                      Edit
-                    </button>
-                    <button className="btn btn-warn btn-sm" onClick={() => removeNewLine(idx)}>
-                      Remove
-                    </button>
-                  </div>
+          {newLines.map((nl, idx) =>
+            nl.editing ? (
+              newLineForm(nl, idx)
+            ) : (
+              <div className="card" key={nl._key}>
+                <span className="badge badge-new">NEW</span> <StatusBadge status={nl.status || data?.newLineStatus} />
+                <div className="card-row"><span>Mat</span><b>{nl.mat}</b></div>
+                <div className="card-row"><span>Batch</span><b>{padBatch(nl.batch) || "—"}</b></div>
+                <div className="card-row"><span>Counted</span><b>{nl.countedQty} <UomText uom={lineUom(nl)} /></b></div>
+                <div style={{ marginTop: 10 }}>
+                  <button className="btn btn-secondary btn-sm" onClick={() => updateNewLine(idx, { editing: true })}>
+                    Edit
+                  </button>
+                  <button className="btn btn-warn btn-sm" onClick={() => removeNewLine(idx)}>
+                    Remove
+                  </button>
                 </div>
-              )
-            )}
+              </div>
+            )
+          )}
+
+          <button id="add-new-line-btn" className="btn btn-secondary" onClick={addNewLine}>
+            + Add New Line
+          </button>
 
           <div className="footer-actions">
             {data && data.page < data.totalPages ? (

@@ -188,3 +188,6 @@ W10 add (user): the WMS-format export gets one extra column 'PI Doc' (our own PI
 - Draft (localStorage `stockcount_draft_v1:<piDocId>:<bin>`, 24 h): every change of answers / new lines / scan box is kept on the device; restored with a banner and "Discard it"; removed when the bin is saved. Saved results are in `count_records` as before (one result per bin per round).
 - Exp. Date no longer shown. `/api/bin` returns `area` and `newLineStatus` (Count: UR; Pre-Count: Block in a Blocked area, else UR); shown in the Pre-Count banner, the scan box header, every new line and the summary.
 - Tested in headless Chrome with mocked API: 3 combos in a row (cursor stays), unknown Mat (focus goes to the unit picker), reload restores the draft, save posts uom + status, draft removed after save. Not yet tried on the PDA.
+
+## 2026-10-12 — v2.3.1: the scan box of 2.3.0 is removed (NOT committed)
+- The user found the always-open scan box at the top confusing. The counting screen is back to the old layout: new lines in the order they were added, "+ Add New Line" at the bottom (the Mat field gets the cursor inside the tap). Kept from 2.3.0: draft on the device, unit picker for a Mat not in Master_UOM, Inventory Status of new lines on the PDA, no Exp. Date, version number.
