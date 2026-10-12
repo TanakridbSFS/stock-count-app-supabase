@@ -3,7 +3,7 @@ import { resolvePiDocForTeam, assertBinInPiDoc } from "../../../lib/pda";
 import { db } from "../../../lib/stocktake";
 import { roundLabel } from "../../../lib/rounds";
 import { padBatch } from "../../../lib/binMasterConvert";
-import { normStatus } from "../../../lib/inventoryStatus";
+import { normStatus, defaultStatusForNewLine } from "../../../lib/inventoryStatus";
 
 // Recount (Count#2+): the SKUs the admin picked for the round, merged from the Bin
 // Master and the earlier Count results of this bin (so a line Count#1 found that the
@@ -81,7 +81,7 @@ export default async function handler(req, res) {
   const pageSize = Math.max(1, parseInt(req.query.pageSize || "50", 10));
 
   try {
-    const [{ round, event }] = await Promise.all([
+    const [{ round, event, piDoc }] = await Promise.all([
       resolvePiDocForTeam(piDocId, teamName),
       assertBinInPiDoc(piDocId, bin),
     ]);
@@ -114,6 +114,10 @@ export default async function handler(req, res) {
       recount,
       focusSkus,
       roundLabel: roundLabel(round.lane, round.round_number),
+      // the Warehouse Area of the PI Doc and the Inventory Status a new line gets there (Count: UR; Pre-Count:
+      // Block in a Blocked area, UR otherwise) — shown on the PDA, set again by the server on save
+      area: piDoc.warehouse_area_code || "",
+      newLineStatus: defaultStatusForNewLine(round.lane, piDoc.warehouse_area_code),
       knownBin,
       total,
       page,

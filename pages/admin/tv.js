@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import AdminGate from "../../components/AdminGate";
+import { versionText } from "../../components/VersionTag";
 
 // TV Progress — one screen, no scrolling, for a TV on the HDMI of the control PC. The active rounds of the
 // event: totals, who is working on which PI Doc and how much is left, and the ranking by average time
@@ -212,6 +213,8 @@ function TvPage() {
             {error ? <span className="err">⚠ {error}</span> : `updated ${updated}`}
             {" · "}
             <Link href="/admin?tab=monitor">menu</Link>
+            {" · "}
+            {versionText()}
           </div>
         </div>
       </header>

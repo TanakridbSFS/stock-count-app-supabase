@@ -5,6 +5,7 @@ import { useSession } from "../../lib/useSession";
 import { padBatch } from "../../lib/binMasterConvert";
 import MATERIAL_UOM from "../../lib/materialUom.json";
 import ScanInput from "../../components/ScanInput";
+import { UOM_OPTIONS } from "../../lib/uomOptions";
 import { MAT_LENGTH, BATCH_LENGTH, matError, batchError, qtyError, blockQtyKeys } from "../../lib/validate";
 import { normStatus, STATUS_STYLE } from "../../lib/inventoryStatus";
 
@@ -67,13 +68,39 @@ function emptyNewLine() {
   return {
     mat: "",
     batch: "",
-    uom: "", // always the Master_UOM unit of the Mat (masterUomFor); empty = Mat not in the list
+    uom: "", // the unit saved: the Master_UOM unit of the Mat, or the one the counter picked (uomPick)
+    uomPick: "", // a Mat that is not in Master_UOM: the unit chosen by hand
     countedQty: "",
     // true while the fields are open for typing; a finished line shows as a
     // compact row with Edit / Remove buttons.
     editing: true,
     _key: Math.random().toString(36).slice(2),
   };
+}
+
+// The scan box at the top of the screen is a new line that is always open (its _key never changes, so the
+// input keeps the cursor from one scan to the next).
+const freshPanel = () => ({ ...emptyNewLine(), _key: "panel" });
+
+// The unit of a new line: from Master_UOM, else the one picked by hand.
+const lineUom = (nl) => masterUomFor(nl.mat) || nl.uomPick || "";
+
+// A draft of the bin is kept on the device while the counter works (the screen is lost on a refresh,
+// a sleeping PDA or a Back tap otherwise); it is removed when the bin is saved.
+const draftKey = (piDocId, bin) => `stockcount_draft_v1:${piDocId}:${bin}`;
+function readDraft(piDocId, bin) {
+  try {
+    const d = JSON.parse(localStorage.getItem(draftKey(piDocId, bin)) || "null");
+    if (!d || typeof d !== "object" || Date.now() - d.savedAt > 24 * 3600 * 1000) return null;
+    return d;
+  } catch {
+    return null;
+  }
+}
+function clearDraft(piDocId, bin) {
+  try {
+    localStorage.removeItem(draftKey(piDocId, bin));
+  } catch {}
 }
 
 // What is wrong with a new line, "" if nothing: Mat and Batch must be filled, Mat 8 digits, Batch up to
@@ -85,6 +112,7 @@ function newLineError(nl) {
   if (!String(nl.batch || "").trim()) return "Batch ห้ามว่าง";
   const b = batchError(nl.batch);
   if (b) return b;
+  if (!lineUom(nl)) return `Mat ${nl.mat} ไม่อยู่ในรายการหน่วย — กรุณาเลือกหน่วย (UOM)`;
   if (String(nl.countedQty).trim() === "") return `กรุณากรอกจำนวนของ Mat ${nl.mat}`;
   return qtyError(nl.countedQty);
 }
@@ -103,7 +131,10 @@ export default function CountBinPage() {
   // editable state for existing master lines, keyed by a stable id built from the line's fields
   // status: 'unanswered' | 'correct' | 'wrong'
   const [edits, setEdits] = useState({});
-  const [newLines, setNewLines] = useState([]);
+  const [newLines, setNewLines] = useState([]); // finished lines (and a finished line reopened for Edit)
+  const [panel, setPanel] = useState(() => freshPanel()); // the scan box at the top
+  const dirty = useRef(false); // the counter changed something on this bin (a draft is kept)
+  const [draftInfo, setDraftInfo] = useState(null); // a draft was restored: { at }
   const comboTimer = useRef(null); // a combo barcode typed one character at a time is applied when it stops
   const [saving, setSaving] = useState(false);
   const initialisedBin = useRef(null);
@@ -181,11 +212,22 @@ export default function CountBinPage() {
               batch: r.batch,
               status: r.status,
               uom: r.uom || masterUomFor(r.mat) || "",
+              uomPick: masterUomFor(r.mat) ? "" : r.uom || "",
               countedQty: String(r.countedQty),
               editing: false,
             }))
         );
         setConfirmedEmpty(json.saved.some((r) => r.lineType === "EMPTY"));
+        // work that was not saved yet (kept on this device) comes back
+        const draft = readDraft(session.piDocId, bin);
+        if (draft) {
+          setEdits((prev) => ({ ...prev, ...(draft.edits || {}) }));
+          setNewLines(Array.isArray(draft.newLines) ? draft.newLines : []);
+          setPanel(draft.panel && draft.panel._key === "panel" ? draft.panel : freshPanel());
+          setConfirmedEmpty(!!draft.confirmedEmpty);
+          dirty.current = true;
+          setDraftInfo({ at: draft.savedAt });
+        }
       }
     } catch (e) {
       setError(e.message);
@@ -199,7 +241,29 @@ export default function CountBinPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [bin, session?.counterName, page, pageSize]);
 
+  useEffect(() => {
+    if (!dirty.current || !bin || !session?.piDocId) return;
+    const t = setTimeout(() => {
+      try {
+        localStorage.setItem(draftKey(session.piDocId, bin), JSON.stringify({ savedAt: Date.now(), edits, newLines, panel, confirmedEmpty }));
+      } catch {}
+    }, 300);
+    return () => clearTimeout(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [edits, newLines, panel, confirmedEmpty]);
+
+  function discardDraft() {
+    clearDraft(session.piDocId, bin);
+    dirty.current = false;
+    setDraftInfo(null);
+    setEdits({});
+    setPanel(freshPanel());
+    initialisedBin.current = null;
+    load();
+  }
+
   function updateEdit(key, patch) {
+    dirty.current = true;
     setEdits((prev) => ({ ...prev, [key]: { ...prev[key], ...patch } }));
   }
 
@@ -234,40 +298,53 @@ export default function CountBinPage() {
     updateEdit(key, { status: "unanswered", countedQty: "" });
   }
 
+  // idx is the position in newLines, or "panel" for the scan box at the top
   function updateNewLine(idx, patch) {
-    setNewLines((prev) => prev.map((l, i) => (i === idx ? { ...l, ...patch } : l)));
+    dirty.current = true;
+    if (idx === "panel") setPanel((p) => ({ ...p, ...patch }));
+    else setNewLines((prev) => prev.map((l, i) => (i === idx ? { ...l, ...patch } : l)));
   }
 
   function removeNewLine(idx) {
-    setNewLines((prev) => prev.filter((_, i) => i !== idx));
+    dirty.current = true;
+    if (idx === "panel") setPanel(freshPanel());
+    else setNewLines((prev) => prev.filter((_, i) => i !== idx));
   }
 
-  function focusAddButton() {
-    setTimeout(() => document.getElementById("add-new-line-btn")?.focus(), 60);
+  function focusPanel(field) {
+    document.getElementById(`newline-panel-${field}`)?.focus({ preventScroll: true });
   }
 
-  function addNewLine() {
-    const line = emptyNewLine();
-    // Render now and give the Mat field the cursor inside the same tap: a field focused later by a timer is
-    // not "focused by the user", and with the keyboard kept away the PDA scanner's text does not reach it.
-    flushSync(() => setNewLines((prev) => [...prev, line]));
-    document.getElementById(`newline-${line._key}-mat`)?.focus({ preventScroll: true });
+  // A finished line from the scan box goes into the list; the scan box is emptied but keeps the cursor
+  // (the same input stays on screen), so the next barcode can be scanned right away.
+  function commitFromPanel(fields) {
+    dirty.current = true;
+    setNewLines((prev) => [...prev, { ...emptyNewLine(), ...fields, editing: false }]);
+    setPanel(freshPanel());
+    setError("");
+    focusPanel("mat");
   }
 
-  // A combo scan (Mat|Batch|Qty) lands in Mat or Batch: fill every field. If
-  // the Qty came with it the line is complete — close it and put the cursor
-  // on "+ New Line"; otherwise go to Counted Qty.
+  // A combo scan (Mat|Batch|Qty) lands in Mat or Batch: fill every field. With a Qty (and a unit known for the
+  // Mat) the line is complete: in the scan box it moves to the list and the box is ready for the next scan;
+  // otherwise go on to the next field.
   function applyCombo(idx, nl, combo) {
-    const match = masterUomFor(combo.mat);
-    const done = combo.qty !== "";
-    updateNewLine(idx, {
-      mat: digitsOnly(combo.mat),
-      batch: combo.batch,
-      ...(done ? { countedQty: combo.qty, editing: false } : {}),
-      uom: match || "",
-    });
-    if (done) focusAddButton();
-    else setTimeout(() => document.getElementById(`newline-${nl._key}-qty`)?.focus(), 60);
+    const mat = digitsOnly(combo.mat);
+    const known = !!masterUomFor(mat);
+    const complete = combo.qty !== "" && known;
+    const uom = masterUomFor(mat) || "";
+    if (complete) {
+      if (idx === "panel") {
+        commitFromPanel({ mat, batch: combo.batch, uom, uomPick: "", countedQty: combo.qty });
+      } else {
+        updateNewLine(idx, { mat, batch: combo.batch, uom, countedQty: combo.qty, editing: false });
+        setTimeout(() => document.getElementById("newline-panel-mat")?.focus({ preventScroll: true }), 60);
+      }
+      return;
+    }
+    updateNewLine(idx, { mat, batch: combo.batch, uom, ...(combo.qty !== "" ? { countedQty: combo.qty } : {}) });
+    const next = !known && mat.length >= MAT_LENGTH ? "uom" : "qty";
+    setTimeout(() => document.getElementById(`newline-${nl._key}-${next}`)?.focus({ preventScroll: true }), 60);
   }
 
   // Mat or Batch text with a "|" in it is a Mat|Batch|Qty barcode: keep it as typed (a scanner may type it one
@@ -295,19 +372,17 @@ export default function CountBinPage() {
 
   // "Done" / Enter on Counted Qty: close the line into its compact view.
   function finishLine(idx) {
-    const nl = newLines[idx];
+    const nl = idx === "panel" ? panel : newLines[idx];
     const bad = newLineError(nl);
     if (bad) {
       setError(bad);
-      return;
-    }
-    if (!masterUomFor(nl.mat)) {
-      setError("ไม่พบ Mat นี้ในรายการหน่วย");
+      if (/หน่วย/.test(bad)) document.getElementById(`newline-${nl._key}-uom`)?.focus({ preventScroll: true });
       return;
     }
     setError("");
-    updateNewLine(idx, { batch: padBatch(nl.batch), uom: masterUomFor(nl.mat), editing: false });
-    focusAddButton();
+    const done = { mat: nl.mat, batch: padBatch(nl.batch), uom: lineUom(nl), uomPick: nl.uomPick, countedQty: nl.countedQty };
+    if (idx === "panel") commitFromPanel(done);
+    else updateNewLine(idx, { ...done, editing: false });
   }
 
   // Builds + validates the list of lines that would be saved right now.
@@ -367,15 +442,15 @@ export default function CountBinPage() {
       });
     }
 
+    if (panel.mat || panel.batch || panel.countedQty) {
+      setError("มีรายการในช่องยิงด้านบนที่ยังไม่เสร็จ — กรอกให้ครบแล้วกด Done หรือกด Clear ก่อนบันทึก");
+      return null;
+    }
     for (const nl of newLines) {
       if (!nl.mat && !nl.batch && !nl.countedQty) continue; // skip totally blank rows
       const bad = newLineError(nl);
       if (bad) {
         setError(`${bad} (New line, Mat: ${nl.mat || "—"})`);
-        return null;
-      }
-      if (!masterUomFor(nl.mat)) {
-        setError(`ไม่พบ Mat นี้ในรายการหน่วย (Mat: ${nl.mat})`);
         return null;
       }
       // One result per Mat + Batch in a bin: a second line with the same Mat + Batch is added to the first.
@@ -389,8 +464,8 @@ export default function CountBinPage() {
         mat: nl.mat,
         matName: "",
         batch: padBatch(nl.batch),
-        status: nl.status, // set by the server for a new line (Count: UR, Pre-Count: by area)
-        uom: masterUomFor(nl.mat),
+        status: nl.status || data.newLineStatus, // the server sets it again (Count: UR, Pre-Count: by area)
+        uom: lineUom(nl),
         expectedQty: "",
         countedQty: Number(nl.countedQty),
         lineType: "NEW",
@@ -479,6 +554,8 @@ export default function CountBinPage() {
 
       setShowSummary(false);
       setPendingLines([]);
+      clearDraft(session.piDocId, bin);
+      dirty.current = false;
 
       if (goToNextBin) {
         router.push("/scan");
@@ -493,6 +570,142 @@ export default function CountBinPage() {
   }
 
   if (!ready || !session || !session.piDocId) return null;
+
+  // The open form of a new line: the scan box at the top (idx "panel") or a finished line reopened for Edit.
+  function newLineForm(nl, idx, isPanel) {
+    const masterUom = masterUomFor(nl.mat);
+    const needUom = !masterUom && nl.mat.length >= MAT_LENGTH && !nl.mat.includes("|");
+    return (
+      <div className={isPanel ? "scan-panel-form" : "card"} key={nl._key}>
+        {!isPanel && (
+          <>
+            <span className="badge badge-new">NEW</span> <StatusBadge status={nl.status || data?.newLineStatus} />
+          </>
+        )}
+        <div className="field" style={{ marginTop: 8 }}>
+          <label>Mat (ตัวเลข {MAT_LENGTH} หลัก)</label>
+          <ScanInput
+            id={`newline-${nl._key}-mat`}
+            keyboard="numeric"
+            pattern="[0-9]*"
+            autoFocus={isPanel}
+            value={nl.mat}
+            invalid={!!((!nl.mat.includes("|") && matError(nl.mat)) || nl.warnMat)}
+            onChange={(e) => {
+              const raw = e.target.value;
+              // A combo barcode (Mat|Batch|Qty) fills every field.
+              if (raw.includes("|")) return onComboText(idx, nl, "mat", raw);
+              const mat = digitsOnly(raw);
+              // More than 8 digits is refused (not kept) and the field says why.
+              if (mat.length > MAT_LENGTH) {
+                updateNewLine(idx, { warnMat: `Mat ต้องไม่เกิน ${MAT_LENGTH} หลัก` });
+                return;
+              }
+              // the unit is looked up on every keystroke; a unit picked by hand is dropped when the Mat changes
+              updateNewLine(idx, { mat, warnMat: "", uom: masterUomFor(mat) || "", uomPick: "" });
+            }}
+            onKeyDown={(e) => {
+              // Scanner Enter after Mat → jump to Batch.
+              if (e.key === "Enter") {
+                e.preventDefault();
+                if (nl.mat.includes("|") && applyComboNow(idx, nl, nl.mat)) return;
+                document.getElementById(`newline-${nl._key}-batch`)?.focus();
+              }
+            }}
+          />
+          {((!nl.mat.includes("|") && matError(nl.mat)) || nl.warnMat) && <div className="field-error">{nl.warnMat || matError(nl.mat)}</div>}
+        </div>
+        <div className="field">
+          <label>Batch (ตัวเลข ไม่เกิน {BATCH_LENGTH} หลัก)</label>
+          <ScanInput
+            id={`newline-${nl._key}-batch`}
+            keyboard="numeric"
+            pattern="[0-9]*"
+            value={nl.batch}
+            invalid={!!((!nl.batch.includes("|") && batchError(nl.batch)) || nl.warnBatch)}
+            onChange={(e) => {
+              const raw = e.target.value;
+              // In case a combo barcode lands in Batch instead of Mat.
+              if (raw.includes("|")) return onComboText(idx, nl, "batch", raw);
+              const batch = digitsOnly(raw);
+              // More than 10 digits is refused (not kept) and the field says why.
+              if (batch.length > BATCH_LENGTH) {
+                updateNewLine(idx, { warnBatch: `Batch ต้องไม่เกิน ${BATCH_LENGTH} หลัก` });
+                return;
+              }
+              updateNewLine(idx, { batch, warnBatch: "" });
+            }}
+            // Batch is always stored as 10 digits (0000000001).
+            onBlur={() => nl.batch && !nl.batch.includes("|") && updateNewLine(idx, { batch: padBatch(nl.batch) })}
+            onKeyDown={(e) => {
+              // Go straight to Counted Qty (or to the unit when the Mat is not in the list).
+              if (e.key === "Enter") {
+                e.preventDefault();
+                if (nl.batch.includes("|") && applyComboNow(idx, nl, nl.batch)) return;
+                updateNewLine(idx, { batch: padBatch(nl.batch) });
+                document.getElementById(`newline-${nl._key}-${needUom && !nl.uomPick ? "uom" : "qty"}`)?.focus();
+              }
+            }}
+          />
+          {((!nl.batch.includes("|") && batchError(nl.batch)) || nl.warnBatch) && <div className="field-error">{nl.warnBatch || batchError(nl.batch)}</div>}
+        </div>
+        <div className="field">
+          <label>UOM</label>
+          {masterUom ? (
+            <b><UomText uom={masterUom} /></b>
+          ) : needUom ? (
+            <>
+              <div style={{ color: "#b45309", fontSize: 13, marginBottom: 4 }}>⚠ Mat นี้ไม่อยู่ในรายการหน่วย (Master_UOM) — เลือกหน่วยเอง</div>
+              <select
+                id={`newline-${nl._key}-uom`}
+                value={nl.uomPick}
+                onChange={(e) => {
+                  updateNewLine(idx, { uomPick: e.target.value });
+                  setTimeout(() => document.getElementById(`newline-${nl._key}-qty`)?.focus({ preventScroll: true }), 30);
+                }}
+                style={{ borderColor: nl.uomPick ? undefined : "#f59e0b" }}
+              >
+                <option value="">-- เลือกหน่วย --</option>
+                {UOM_OPTIONS.map((u) => (
+                  <option key={u} value={u}>{u}</option>
+                ))}
+              </select>
+            </>
+          ) : (
+            <span style={{ color: "#667085" }}>—</span>
+          )}
+        </div>
+        <div className="field">
+          <label>Counted Qty</label>
+          <ScanInput
+            id={`newline-${nl._key}-qty`}
+            type="number"
+            min="0"
+            step="any"
+            keyboard="numeric"
+            value={nl.countedQty}
+            invalid={!!qtyError(nl.countedQty)}
+            onChange={(e) => updateNewLine(idx, { countedQty: e.target.value })}
+            onKeyDown={(e) => {
+              blockQtyKeys(e);
+              // Enter finishes this line.
+              if (e.key === "Enter") {
+                e.preventDefault();
+                finishLine(idx);
+              }
+            }}
+          />
+          {qtyError(nl.countedQty) && <div className="field-error">{qtyError(nl.countedQty)}</div>}
+        </div>
+        <button className="btn btn-primary btn-sm" onClick={() => finishLine(idx)}>
+          Done
+        </button>
+        <button className="btn btn-secondary btn-sm" onClick={() => removeNewLine(idx)}>
+          {isPanel ? "Clear" : "Remove"}
+        </button>
+      </div>
+    );
+  }
 
   const saved = data?.saved || [];
   const lastSaved = saved.reduce((m, r) => (!m || r.timestamp > m.timestamp ? r : m), null);
@@ -510,7 +723,19 @@ export default function CountBinPage() {
         </div>
       )}
       {data?.blind && (
-        <div className="banner banner-info">Pre-Count — add a new line for every item you find in this bin.</div>
+        <div className="banner banner-info">
+          Pre-Count — scan every item you find in this bin into the box below.
+          {data.area ? ` Area ${data.area}: items are saved as ` : ""}
+          {data.area && <StatusBadge status={data.newLineStatus} />}
+        </div>
+      )}
+      {draftInfo && (
+        <div className="banner banner-warn">
+          Restored what was not saved yet (kept on this device, {new Date(draftInfo.at).toLocaleTimeString("en-GB").slice(0, 5)}).{" "}
+          <button className="btn btn-secondary btn-sm" onClick={discardDraft}>
+            Discard it
+          </button>
+        </div>
       )}
 
       {showSummary && (
@@ -528,7 +753,7 @@ export default function CountBinPage() {
                 <>
                   <div className="card-row"><span>Mat</span><b>{l.mat}{l.matName ? ` — ${l.matName}` : ""}</b></div>
                   <div className="card-row"><span>Batch</span><b>{l.batch || "—"}</b></div>
-                  {l.lineType !== "NEW" && <div className="card-row"><span>Status</span><b><StatusBadge status={l.status} /></b></div>}
+                  <div className="card-row"><span>Status</span><b><StatusBadge status={l.status} /></b></div>
                   {!data?.recount && (
                     <div className="card-row"><span>Expected</span><b>{l.expectedQty === "" ? "—" : <>{l.expectedQty} <UomText uom={l.uom} /></>}</b></div>
                   )}
@@ -590,20 +815,33 @@ export default function CountBinPage() {
                 This bin has no expected items in the master data.
               </div>
               {!confirmedEmpty ? (
-                <button className="btn btn-correct btn-sm" onClick={() => setConfirmedEmpty(true)}>
+                <button className="btn btn-correct btn-sm" onClick={() => { dirty.current = true; setConfirmedEmpty(true); }}>
                   ✓ Confirm — Nothing Found
                 </button>
               ) : (
                 <div>
                   <span className="badge badge-zero">CONFIRMED — Nothing Found</span>{" "}
-                  <button className="btn btn-secondary btn-sm" onClick={() => setConfirmedEmpty(false)}>
+                  <button className="btn btn-secondary btn-sm" onClick={() => { dirty.current = true; setConfirmedEmpty(false); }}>
                     Edit
                   </button>
                 </div>
               )}
               <div style={{ fontSize: 13, color: "#666", marginTop: 8 }}>
-                Found stock anyway? Use "+ Add New Line" below instead.
+                Found stock anyway? Scan it into the box at the top.
               </div>
+            </div>
+          )}
+
+          {data && (
+            <div className="scan-panel">
+              <div className="scan-panel-head">
+                <b>Scan new item</b>
+                <span>
+                  Mat|Batch|Qty, or Mat → Batch → Qty · status <StatusBadge status={data.newLineStatus} />
+                </span>
+                <span className="scan-count">{newLines.length} added</span>
+              </div>
+              {newLineForm(panel, "panel", true)}
             </div>
           )}
 
@@ -689,9 +927,6 @@ export default function CountBinPage() {
                     </b>
                   </div>
                 )}
-                {l.ExpirationDate && (
-                  <div className="card-row"><span>Exp. Date</span><b>{l.ExpirationDate}</b></div>
-                )}
 
                 {e.status === "unanswered" && (
                   <div style={{ marginTop: 10 }}>
@@ -770,17 +1005,18 @@ export default function CountBinPage() {
             );
           })}
 
-          {newLines.map((nl, idx) => {
-            const masterUom = masterUomFor(nl.mat);
-
-            // Finished line: compact row with Edit / Remove.
-            if (!nl.editing) {
-              return (
+          {[...newLines]
+            .map((nl, idx) => ({ nl, idx }))
+            .reverse()
+            .map(({ nl, idx }) =>
+              nl.editing ? (
+                newLineForm(nl, idx, false)
+              ) : (
                 <div className="card" key={nl._key}>
-                  <span className="badge badge-new">NEW</span>
+                  <span className="badge badge-new">NEW</span> <StatusBadge status={nl.status || data?.newLineStatus} />
                   <div className="card-row"><span>Mat</span><b>{nl.mat}</b></div>
                   <div className="card-row"><span>Batch</span><b>{padBatch(nl.batch) || "—"}</b></div>
-                  <div className="card-row"><span>Counted</span><b>{nl.countedQty} <UomText uom={nl.uom} /></b></div>
+                  <div className="card-row"><span>Counted</span><b>{nl.countedQty} <UomText uom={lineUom(nl)} /></b></div>
                   <div style={{ marginTop: 10 }}>
                     <button className="btn btn-secondary btn-sm" onClick={() => updateNewLine(idx, { editing: true })}>
                       Edit
@@ -790,131 +1026,8 @@ export default function CountBinPage() {
                     </button>
                   </div>
                 </div>
-              );
-            }
-
-            return (
-              <div className="card" key={nl._key}>
-                <span className="badge badge-new">NEW</span>
-                <div className="field" style={{ marginTop: 8 }}>
-                  <label>Mat (ตัวเลข {MAT_LENGTH} หลัก)</label>
-                  <ScanInput
-                    id={`newline-${nl._key}-mat`}
-                    keyboard="numeric"
-                    pattern="[0-9]*"
-                    value={nl.mat}
-                    invalid={!!((!nl.mat.includes("|") && matError(nl.mat)) || nl.warnMat)}
-                    onChange={(e) => {
-                      const raw = e.target.value;
-                      // A combo barcode (Mat|Batch|Qty) fills every field.
-                      if (raw.includes("|")) return onComboText(idx, nl, "mat", raw);
-                      const mat = digitsOnly(raw);
-                      // More than 8 digits is refused (not kept) and the field says why.
-                      if (mat.length > MAT_LENGTH) {
-                        updateNewLine(idx, { warnMat: `Mat ต้องไม่เกิน ${MAT_LENGTH} หลัก` });
-                        return;
-                      }
-                      const match = masterUomFor(mat);
-                      updateNewLine(idx, {
-                        mat,
-                        warnMat: "",
-                        // Fresh lookup on every keystroke — once the Mat code
-                        // matches something in Master_UOM, auto-fill its UOM
-                        // (unless the counter already chose to override it).
-                        uom: match || "",
-                      });
-                    }}
-                    onKeyDown={(e) => {
-                      // Scanner Enter after Mat → jump to Batch.
-                      if (e.key === "Enter") {
-                        e.preventDefault();
-                        if (nl.mat.includes("|") && applyComboNow(idx, nl, nl.mat)) return;
-                        document.getElementById(`newline-${nl._key}-batch`)?.focus();
-                      }
-                    }}
-                  />
-                  {((!nl.mat.includes("|") && matError(nl.mat)) || nl.warnMat) && <div className="field-error">{nl.warnMat || matError(nl.mat)}</div>}
-                </div>
-                <div className="field">
-                  <label>Batch (ตัวเลข ไม่เกิน {BATCH_LENGTH} หลัก)</label>
-                  <ScanInput
-                    id={`newline-${nl._key}-batch`}
-                    keyboard="numeric"
-                    pattern="[0-9]*"
-                    value={nl.batch}
-                    invalid={!!((!nl.batch.includes("|") && batchError(nl.batch)) || nl.warnBatch)}
-                    onChange={(e) => {
-                      const raw = e.target.value;
-                      // In case a combo barcode lands in Batch instead of Mat.
-                      if (raw.includes("|")) return onComboText(idx, nl, "batch", raw);
-                      const batch = digitsOnly(raw);
-                      // More than 10 digits is refused (not kept) and the field says why.
-                      if (batch.length > BATCH_LENGTH) {
-                        updateNewLine(idx, { warnBatch: `Batch ต้องไม่เกิน ${BATCH_LENGTH} หลัก` });
-                        return;
-                      }
-                      updateNewLine(idx, { batch, warnBatch: "" });
-                    }}
-                    // Batch is always stored as 10 digits (0000000001).
-                    onBlur={() => nl.batch && !nl.batch.includes("|") && updateNewLine(idx, { batch: padBatch(nl.batch) })}
-                    onKeyDown={(e) => {
-                      // Skip the UOM dropdown (manually chosen, not scanned) —
-                      // go straight to Counted Qty.
-                      if (e.key === "Enter") {
-                        e.preventDefault();
-                        if (nl.batch.includes("|") && applyComboNow(idx, nl, nl.batch)) return;
-                        updateNewLine(idx, { batch: padBatch(nl.batch) });
-                        document.getElementById(`newline-${nl._key}-qty`)?.focus();
-                      }
-                    }}
-                  />
-                  {((!nl.batch.includes("|") && batchError(nl.batch)) || nl.warnBatch) && <div className="field-error">{nl.warnBatch || batchError(nl.batch)}</div>}
-                </div>
-                <div className="field">
-                  <label>UOM</label>
-                  {masterUom ? (
-                    <b><UomText uom={masterUom} /></b>
-                  ) : (
-                    <span style={{ color: nl.mat.length >= 8 ? "#b42318" : "#667085" }}>
-                      {nl.mat.length >= 8 ? "ไม่พบ Mat นี้ในรายการหน่วย" : "—"}
-                    </span>
-                  )}
-                </div>
-                <div className="field">
-                  <label>Counted Qty</label>
-                  <ScanInput
-                    id={`newline-${nl._key}-qty`}
-                    type="number"
-                    min="0"
-                    step="any"
-                    keyboard="numeric"
-                    value={nl.countedQty}
-                    invalid={!!qtyError(nl.countedQty)}
-                    onChange={(e) => updateNewLine(idx, { countedQty: e.target.value })}
-                    onKeyDown={(e) => {
-                      blockQtyKeys(e);
-                      // Enter finishes this line.
-                      if (e.key === "Enter") {
-                        e.preventDefault();
-                        finishLine(idx);
-                      }
-                    }}
-                  />
-                  {qtyError(nl.countedQty) && <div className="field-error">{qtyError(nl.countedQty)}</div>}
-                </div>
-                <button className="btn btn-primary btn-sm" onClick={() => finishLine(idx)}>
-                  Done
-                </button>
-                <button className="btn btn-secondary btn-sm" onClick={() => removeNewLine(idx)}>
-                  Remove
-                </button>
-              </div>
-            );
-          })}
-
-          <button id="add-new-line-btn" className="btn btn-secondary" onClick={addNewLine}>
-            + Add New Line
-          </button>
+              )
+            )}
 
           <div className="footer-actions">
             {data && data.page < data.totalPages ? (
