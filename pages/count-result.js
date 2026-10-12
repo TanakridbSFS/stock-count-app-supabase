@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
+import { naturalCompare } from "../lib/binSort";
 
 // Count Result — Mat|Batch rollup table (Expected / Actual / Diff), ignoring
 // Bin Location entirely. Filters live right at the table header: a zone
@@ -127,7 +128,7 @@ export default function CountResultPage() {
     if (typeof av === "number" && typeof bv === "number") {
       cmp = av - bv;
     } else {
-      cmp = String(av ?? "").localeCompare(String(bv ?? ""));
+      cmp = naturalCompare(av ?? "", bv ?? "");
     }
     return sortDir === "asc" ? cmp : -cmp;
   });

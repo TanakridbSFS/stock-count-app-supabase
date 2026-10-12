@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/router";
 import Link from "next/link";
 import { useSession } from "../lib/useSession";
+import ScanInput from "../components/ScanInput";
 
 // Team login: scan the Team QR (the PDA scanner types the team name and
 // sends Enter). No typing of names, no password. The team stays logged in
@@ -65,8 +66,9 @@ export default function StartPage() {
           {error && <div className="banner banner-warn">{error}</div>}
           <div className="field">
             <label>Scan your Team QR code</label>
-            <input
+            <ScanInput
               ref={inputRef}
+              keyboard="text"
               value={code}
               onChange={(e) => setCode(e.target.value)}
               onKeyDown={(e) => {

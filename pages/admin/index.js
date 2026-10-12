@@ -95,6 +95,11 @@ function AdminConsole() {
             <Item href="/admin/progress" title="Progress">
               Team × PI Doc completion for a round. Refreshes every minute.
             </Item>
+            <Item href="/admin/tv" title="TV Progress">
+              One screen for a TV, no scrolling: who is working on which PI Doc and what is left, plus the Top 5 fastest
+              and Top 10 slowest teams by time per bin. Tabs per Storage Location, Light / Dark, refreshes every 30
+              seconds.
+            </Item>
             <Item href="/admin/timing" title="Timing">
               How long counting takes: time per bin, per PI Doc, per team and per area, bins per hour, for a day or a
               round (for UAT and planning).
@@ -104,7 +109,7 @@ function AdminConsole() {
               see its Warehouse Area, PI Doc and team.
             </Item>
             <Item href="/admin/report" title="Consolidated report">
-              Latest round wins per Bin + Mat + Batch, with a Pre-Count toggle and CSV download.
+              Latest round wins per Bin + Mat + Batch + Inventory Status. Choose Count, Pre-Count or both; CSV and SAP file download.
             </Item>
           </div>
         </>

@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/router";
 import { useSession } from "../lib/useSession";
+import ScanInput from "../components/ScanInput";
 
 // Between team login (/) and bin scanning (/scan): pick one of the PI Docs
 // assigned to this team in a currently ACTIVE round (tap it, or scan the
@@ -79,8 +80,9 @@ export default function JoinPiDocPage() {
 
       <div className="field">
         <label>Scan PI Doc number</label>
-        <input
+        <ScanInput
           ref={inputRef}
+          keyboard="text"
           value={code}
           onChange={(e) => setCode(e.target.value)}
           onKeyDown={(e) => {

@@ -3,6 +3,9 @@ import { useRouter } from "next/router";
 import { useSession } from "../../lib/useSession";
 import { padBatch } from "../../lib/binMasterConvert";
 import MATERIAL_UOM from "../../lib/materialUom.json";
+import ScanInput from "../../components/ScanInput";
+import { MAT_LENGTH, BATCH_LENGTH, matError, batchError, qtyError, blockQtyKeys } from "../../lib/validate";
+import { normStatus, STATUS_STYLE } from "../../lib/inventoryStatus";
 
 const PAGE_SIZE_OPTIONS = [20, 50, 100, 500, 1000];
 
@@ -28,7 +31,18 @@ function parseComboScan(raw) {
 // Mat and Batch are digits only (the PDA shows the numeric keypad for them).
 const digitsOnly = (v) => String(v).replace(/\D/g, "");
 
-const lineKeyOf = (mat, batch) => `${mat || ""}|${padBatch(batch)}`;
+// A line is a Mat + Batch + Inventory Status of the bin (UR / Block / QI); no status = UR.
+const lineKeyOf = (mat, batch, status) => `${mat || ""}|${padBatch(batch)}|${normStatus(status)}`;
+
+// Inventory Status of a Master line, as shown on the card.
+function StatusBadge({ status }) {
+  const st = normStatus(status);
+  return (
+    <span className="badge" style={STATUS_STYLE[st]}>
+      {st}
+    </span>
+  );
+}
 
 // Type of a saved line from expected (Master) vs counted quantity. The Master has
 // nothing and nothing is found (a Count#1 NEW line that is gone) = no difference.
@@ -59,6 +73,19 @@ function emptyNewLine() {
     editing: true,
     _key: Math.random().toString(36).slice(2),
   };
+}
+
+// What is wrong with a new line, "" if nothing: Mat and Batch must be filled, Mat 8 digits, Batch up to
+// 10 digits (a shorter Batch is padded with zeros), the counted quantity a number that is not negative.
+function newLineError(nl) {
+  if (!String(nl.mat || "").trim()) return "Mat ห้ามว่าง";
+  const m = matError(nl.mat);
+  if (m) return m;
+  if (!String(nl.batch || "").trim()) return "Batch ห้ามว่าง";
+  const b = batchError(nl.batch);
+  if (b) return b;
+  if (String(nl.countedQty).trim() === "") return `กรุณากรอกจำนวนของ Mat ${nl.mat}`;
+  return qtyError(nl.countedQty);
 }
 
 export default function CountBinPage() {
@@ -95,7 +122,7 @@ export default function CountBinPage() {
     else if (!session.piDocId) router.replace("/join");
   }, [ready, session, router]);
 
-  const lineKey = (l) => `${l.Mat}|${l.Batch}|${l.UOM}`;
+  const lineKey = (l) => `${l.Mat}|${l.Batch}|${l.UOM}|${normStatus(l.Status)}`;
 
   const load = useCallback(async () => {
     if (!bin || !session || !session.piDocId) return;
@@ -115,13 +142,13 @@ export default function CountBinPage() {
       // Pre-fill edits for lines on this page that don't have edits yet —
       // from the saved result of this bin if there is one (a re-scan shows
       // the latest result), otherwise unanswered.
-      const savedByKey = new Map(json.saved.map((r) => [lineKeyOf(r.mat, r.batch), r]));
+      const savedByKey = new Map(json.saved.map((r) => [lineKeyOf(r.mat, r.batch, r.status), r]));
       setEdits((prev) => {
         const next = { ...prev };
         for (const l of json.lines) {
           const k = lineKey(l);
           if (next[k]) continue;
-          const rec = savedByKey.get(lineKeyOf(l.Mat, l.Batch));
+          const rec = savedByKey.get(lineKeyOf(l.Mat, l.Batch, l.Status));
           if (json.recount && rec) {
             // recount: saved = confirmed the earlier count, or a new actual
             next[k] =
@@ -150,6 +177,7 @@ export default function CountBinPage() {
               ...emptyNewLine(),
               mat: r.mat,
               batch: r.batch,
+              status: r.status,
               uom: r.uom || masterUomFor(r.mat) || "",
               countedQty: String(r.countedQty),
               editing: false,
@@ -185,6 +213,12 @@ export default function CountBinPage() {
   // summarizes it (like "ถูก" does) without submitting anything yet.
   function closeWrong(key, countedQty) {
     if (String(countedQty).trim() === "") return; // nothing to close yet
+    const bad = qtyError(countedQty);
+    if (bad) {
+      setError(bad);
+      return;
+    }
+    setError("");
     updateEdit(key, { status: "wrong_closed", countedQty });
   }
 
@@ -235,16 +269,13 @@ export default function CountBinPage() {
   // "Done" / Enter on Counted Qty: close the line into its compact view.
   function finishLine(idx) {
     const nl = newLines[idx];
-    if (!nl.mat) {
-      setError("Please enter the Mat for this line.");
+    const bad = newLineError(nl);
+    if (bad) {
+      setError(bad);
       return;
     }
     if (!masterUomFor(nl.mat)) {
       setError("ไม่พบ Mat นี้ในรายการหน่วย");
-      return;
-    }
-    if (String(nl.countedQty).trim() === "") {
-      setError(`Please enter a quantity for Mat ${nl.mat}.`);
       return;
     }
     setError("");
@@ -279,6 +310,10 @@ export default function CountBinPage() {
         setError(`Please enter a quantity for ${l.Mat} (${l.Batch}) — 0 if nothing is there.`);
         return null;
       }
+      if (e.status === "wrong_closed" && qtyError(e.countedQty)) {
+        setError(`${qtyError(e.countedQty)} (${l.Mat} ${l.Batch})`);
+        return null;
+      }
       // Count: "Correct" = the Master quantity is right. Recount: "Correct" = the
       // earlier count is right, so that number is saved again for this round.
       const countedQty =
@@ -294,6 +329,7 @@ export default function CountBinPage() {
         mat: l.Mat,
         matName: l.MatName,
         batch: l.Batch,
+        status: normStatus(l.Status),
         uom: l.UOM,
         expectedQty: l.Qty === null ? "" : l.Qty,
         countedQty,
@@ -306,12 +342,9 @@ export default function CountBinPage() {
 
     for (const nl of newLines) {
       if (!nl.mat && !nl.batch && !nl.countedQty) continue; // skip totally blank rows
-      if (!nl.mat) {
-        setError("Please enter the Mat for every new line.");
-        return null;
-      }
-      if (String(nl.countedQty).trim() === "") {
-        setError(`Please enter a quantity for the new line (Mat: ${nl.mat || "—"}).`);
+      const bad = newLineError(nl);
+      if (bad) {
+        setError(`${bad} (New line, Mat: ${nl.mat || "—"})`);
         return null;
       }
       if (!masterUomFor(nl.mat)) {
@@ -329,6 +362,7 @@ export default function CountBinPage() {
         mat: nl.mat,
         matName: "",
         batch: padBatch(nl.batch),
+        status: nl.status, // set by the server for a new line (Count: UR, Pre-Count: by area)
         uom: masterUomFor(nl.mat),
         expectedQty: "",
         countedQty: Number(nl.countedQty),
@@ -368,15 +402,15 @@ export default function CountBinPage() {
   // and saved records of master lines on the current page, whose line is no
   // longer in what is being saved. The server deletes them.
   function computeRemoved(lines) {
-    const keep = new Set(lines.map((l) => lineKeyOf(l.mat, l.batch)));
-    const pageKeys = new Set((data?.lines || []).map((l) => lineKeyOf(l.Mat, l.Batch)));
+    const keep = new Set(lines.map((l) => lineKeyOf(l.mat, l.batch, l.status)));
+    const pageKeys = new Set((data?.lines || []).map((l) => lineKeyOf(l.Mat, l.Batch, l.Status)));
     return (data?.saved || [])
       .filter((r) => {
-        const k = lineKeyOf(r.mat, r.batch);
+        const k = lineKeyOf(r.mat, r.batch, r.status);
         const mine = r.lineType === "NEW" || r.lineType === "EMPTY" || pageKeys.has(k);
         return mine && !keep.has(k);
       })
-      .map((r) => ({ mat: r.mat, batch: r.batch }));
+      .map((r) => ({ mat: r.mat, batch: r.batch, status: r.status }));
   }
 
   // "Save & Next Page" — no bin summary needed yet, save this page right away.
@@ -467,6 +501,7 @@ export default function CountBinPage() {
                 <>
                   <div className="card-row"><span>Mat</span><b>{l.mat}{l.matName ? ` — ${l.matName}` : ""}</b></div>
                   <div className="card-row"><span>Batch</span><b>{l.batch || "—"}</b></div>
+                  {l.lineType !== "NEW" && <div className="card-row"><span>Status</span><b><StatusBadge status={l.status} /></b></div>}
                   {!data?.recount && (
                     <div className="card-row"><span>Expected</span><b>{l.expectedQty === "" ? "—" : <>{l.expectedQty} <UomText uom={l.uom} /></>}</b></div>
                   )}
@@ -601,6 +636,7 @@ export default function CountBinPage() {
               <div className="card" key={k}>
                 <div className="card-row"><span>Mat</span><b>{l.Mat} — {l.MatName}</b></div>
                 <div className="card-row"><span>Batch</span><b>{l.Batch}</b></div>
+                <div className="card-row"><span>Status</span><b><StatusBadge status={l.Status} /></b></div>
                 {!data.recount && (
                   <div className="card-row">
                     <span>Master Qty</span>
@@ -660,12 +696,17 @@ export default function CountBinPage() {
                   <div style={{ marginTop: 10 }}>
                     <div className="field" style={{ marginBottom: 8 }}>
                       <label>Counted Qty (<UomText uom={l.UOM} />)</label>
-                      <input
+                      <ScanInput
                         type="number"
+                        min="0"
+                        step="any"
+                        keyboard="numeric"
                         autoFocus
                         value={e.countedQty}
+                        invalid={!!qtyError(e.countedQty)}
                         onChange={(ev) => updateEdit(k, { countedQty: ev.target.value })}
                         onKeyDown={(ev) => {
+                          blockQtyKeys(ev);
                           // PDA scanners send Enter after typing — make it do
                           // the useful thing here: close this box, same as
                           // tapping "Confirm".
@@ -675,6 +716,7 @@ export default function CountBinPage() {
                           }
                         }}
                       />
+                      {qtyError(e.countedQty) && <div className="field-error">{qtyError(e.countedQty)}</div>}
                     </div>
                     <button className="btn btn-primary btn-sm" onClick={() => closeWrong(k, e.countedQty)}>
                       Confirm
@@ -728,21 +770,28 @@ export default function CountBinPage() {
               <div className="card" key={nl._key}>
                 <span className="badge badge-new">NEW</span>
                 <div className="field" style={{ marginTop: 8 }}>
-                  <label>Mat</label>
-                  <input
+                  <label>Mat (ตัวเลข {MAT_LENGTH} หลัก)</label>
+                  <ScanInput
                     id={`newline-${nl._key}-mat`}
-                    inputMode="numeric"
+                    keyboard="numeric"
                     pattern="[0-9]*"
                     value={nl.mat}
+                    invalid={!!(matError(nl.mat) || nl.warnMat)}
                     onChange={(e) => {
                       const raw = e.target.value;
                       // A combo barcode (Mat|Batch|Qty) fills every field.
                       const combo = parseComboScan(raw);
                       if (combo) return applyCombo(idx, nl, combo);
                       const mat = digitsOnly(raw);
+                      // More than 8 digits is refused (not kept) and the field says why.
+                      if (!raw.includes("|") && mat.length > MAT_LENGTH) {
+                        updateNewLine(idx, { warnMat: `Mat ต้องไม่เกิน ${MAT_LENGTH} หลัก` });
+                        return;
+                      }
                       const match = masterUomFor(mat);
                       updateNewLine(idx, {
                         mat,
+                        warnMat: "",
                         // Fresh lookup on every keystroke — once the Mat code
                         // matches something in Master_UOM, auto-fill its UOM
                         // (unless the counter already chose to override it).
@@ -757,20 +806,28 @@ export default function CountBinPage() {
                       }
                     }}
                   />
+                  {(matError(nl.mat) || nl.warnMat) && <div className="field-error">{nl.warnMat || matError(nl.mat)}</div>}
                 </div>
                 <div className="field">
-                  <label>Batch</label>
-                  <input
+                  <label>Batch (ตัวเลข ไม่เกิน {BATCH_LENGTH} หลัก)</label>
+                  <ScanInput
                     id={`newline-${nl._key}-batch`}
-                    inputMode="numeric"
+                    keyboard="numeric"
                     pattern="[0-9]*"
                     value={nl.batch}
+                    invalid={!!(batchError(nl.batch) || nl.warnBatch)}
                     onChange={(e) => {
                       const raw = e.target.value;
                       // In case a combo barcode lands in Batch instead of Mat.
                       const combo = parseComboScan(raw);
                       if (combo) return applyCombo(idx, nl, combo);
-                      updateNewLine(idx, { batch: digitsOnly(raw) });
+                      const batch = digitsOnly(raw);
+                      // More than 10 digits is refused (not kept) and the field says why.
+                      if (!raw.includes("|") && batch.length > BATCH_LENGTH) {
+                        updateNewLine(idx, { warnBatch: `Batch ต้องไม่เกิน ${BATCH_LENGTH} หลัก` });
+                        return;
+                      }
+                      updateNewLine(idx, { batch, warnBatch: "" });
                     }}
                     // Batch is always stored as 10 digits (0000000001).
                     onBlur={() => nl.batch && updateNewLine(idx, { batch: padBatch(nl.batch) })}
@@ -784,6 +841,7 @@ export default function CountBinPage() {
                       }
                     }}
                   />
+                  {(batchError(nl.batch) || nl.warnBatch) && <div className="field-error">{nl.warnBatch || batchError(nl.batch)}</div>}
                 </div>
                 <div className="field">
                   <label>UOM</label>
@@ -797,13 +855,17 @@ export default function CountBinPage() {
                 </div>
                 <div className="field">
                   <label>Counted Qty</label>
-                  <input
+                  <ScanInput
                     id={`newline-${nl._key}-qty`}
                     type="number"
-                    inputMode="numeric"
+                    min="0"
+                    step="any"
+                    keyboard="numeric"
                     value={nl.countedQty}
+                    invalid={!!qtyError(nl.countedQty)}
                     onChange={(e) => updateNewLine(idx, { countedQty: e.target.value })}
                     onKeyDown={(e) => {
+                      blockQtyKeys(e);
                       // Enter finishes this line.
                       if (e.key === "Enter") {
                         e.preventDefault();
@@ -811,6 +873,7 @@ export default function CountBinPage() {
                       }
                     }}
                   />
+                  {qtyError(nl.countedQty) && <div className="field-error">{qtyError(nl.countedQty)}</div>}
                 </div>
                 <button className="btn btn-primary btn-sm" onClick={() => finishLine(idx)}>
                   Done

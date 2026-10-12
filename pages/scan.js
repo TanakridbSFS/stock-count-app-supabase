@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/router";
 import { useSession } from "../lib/useSession";
+import ScanInput from "../components/ScanInput";
 
 export default function ScanPage() {
   const router = useRouter();
@@ -63,8 +64,9 @@ export default function ScanPage() {
 
       <div className="field">
         <label>Bin Location</label>
-        <input
+        <ScanInput
           ref={inputRef}
+          keyboard="text"
           value={binInput}
           onChange={(e) => setBinInput(e.target.value)}
           onKeyDown={handleKeyDown}

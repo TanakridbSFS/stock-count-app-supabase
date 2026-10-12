@@ -3,6 +3,7 @@ import { resolvePiDocForTeam, assertBinInPiDoc } from "../../../lib/pda";
 import { db } from "../../../lib/stocktake";
 import { roundLabel } from "../../../lib/rounds";
 import { padBatch } from "../../../lib/binMasterConvert";
+import { normStatus } from "../../../lib/inventoryStatus";
 
 // Recount (Count#2+): the SKUs the admin picked for the round, merged from the Bin
 // Master and the earlier Count results of this bin (so a line Count#1 found that the
@@ -29,11 +30,11 @@ async function recountLines(round, bin, masterLines) {
     if (res.error) throw res.error;
     recs = res.data;
   }
-  // latest earlier result per mat|batch (higher round wins, then later time)
+  // latest earlier result per mat|batch|status (higher round wins, then later time)
   const prev = new Map();
   for (const r of recs) {
     if (!r.mat || !focus.has(String(r.mat))) continue;
-    const k = `${r.mat}|${padBatch(r.batch)}`;
+    const k = `${r.mat}|${padBatch(r.batch)}|${normStatus(r.inventory_status)}`;
     const cur = prev.get(k);
     const rn = roundById[r.count_round_id].round_number;
     if (!cur || rn > cur.rn || (rn === cur.rn && r.ts > cur.rec.ts)) prev.set(k, { rn, rec: r });
@@ -41,7 +42,7 @@ async function recountLines(round, bin, masterLines) {
   const lines = new Map();
   for (const l of masterLines) {
     if (!focus.has(String(l.Mat))) continue;
-    lines.set(`${l.Mat}|${l.Batch}`, { ...l, PrevQty: null });
+    lines.set(`${l.Mat}|${l.Batch}|${l.Status}`, { ...l, PrevQty: null });
   }
   for (const [k, { rn, rec }] of prev) {
     const line = lines.get(k) || {
@@ -52,6 +53,7 @@ async function recountLines(round, bin, masterLines) {
       Qty: null,
       UOM: rec.uom || "",
       ExpirationDate: "",
+      Status: normStatus(rec.inventory_status),
     };
     line.PrevQty = rec.counted_qty === null ? null : Number(rec.counted_qty);
     line.PrevRound = roundLabel("COUNT", rn);
@@ -60,7 +62,12 @@ async function recountLines(round, bin, masterLines) {
     line.PrevType = rec.line_type;
     lines.set(k, line);
   }
-  return [...lines.values()].sort((a, b) => String(a.Mat).localeCompare(String(b.Mat)) || String(a.Batch).localeCompare(String(b.Batch)));
+  return [...lines.values()].sort(
+    (a, b) =>
+      String(a.Mat).localeCompare(String(b.Mat)) ||
+      String(a.Batch).localeCompare(String(b.Batch)) ||
+      String(a.Status).localeCompare(String(b.Status))
+  );
 }
 
 // GET /api/bin/:bin?piDocId=...&teamName=...&page=1&pageSize=50

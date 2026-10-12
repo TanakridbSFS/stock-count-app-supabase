@@ -1,6 +1,7 @@
 import { withAdmin } from "../../../lib/adminAuth";
 import { db, fetchAll } from "../../../lib/stocktake";
 import { canTeamCount } from "../../../lib/capabilities";
+import { compareBins } from "../../../lib/binSort";
 
 // GET   ?roundId=...   PI Docs of a round with team, bin counts and counting progress
 // PATCH { piDocIds: [...], teamId: uuid | null }
@@ -24,7 +25,7 @@ async function handler(req, res) {
       const docs = await fetchAll(() =>
         supabase
           .from("pi_docs")
-          .select("id, pi_doc_no, warehouse_area_code, sap_storage_location, zone_type, assigned_team_id")
+          .select("id, pi_doc_no, warehouse_area_code, sap_storage_location, zone_type, assigned_team_id, g_floor")
           .eq("count_round_id", roundId)
           .order("pi_doc_no")
       );
@@ -70,7 +71,7 @@ async function handler(req, res) {
           teamName: d.assigned_team_id ? teamName[d.assigned_team_id] : null,
           binCount: (binsByDoc[d.id] || []).length,
           binsCounted: (binsByDoc[d.id] || []).filter((b) => countedByDoc[d.id]?.has(b)).length,
-          firstBin: (binsByDoc[d.id] || []).sort()[0] || null,
+          firstBin: (binsByDoc[d.id] || []).sort(compareBins)[0] || null,
           startedAt: firstAtByDoc[d.id] || null,
         })),
       });
@@ -83,7 +84,7 @@ async function handler(req, res) {
       }
       const { data: docs, error } = await supabase
         .from("pi_docs")
-        .select("id, pi_doc_no, warehouse_area_code, sap_storage_location, count_round_id")
+        .select("id, pi_doc_no, warehouse_area_code, sap_storage_location, count_round_id, g_floor")
         .in("id", piDocIds);
       if (error) throw error;
 

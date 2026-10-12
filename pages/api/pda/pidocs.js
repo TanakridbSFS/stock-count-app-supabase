@@ -2,6 +2,7 @@ import { findTeamByName, resolvePiDocForTeam, HttpError } from "../../../lib/pda
 import { db, fetchAll } from "../../../lib/stocktake";
 import { roundLabel } from "../../../lib/rounds";
 import { runAutoAssignEverywhere } from "../../../lib/autoAssign";
+import { compareBins } from "../../../lib/binSort";
 
 // GET /api/pda/pidocs?team=Team12
 //   The team's PI Docs that are in a currently ACTIVE round, with progress.
@@ -29,7 +30,7 @@ export default async function handler(req, res) {
         },
         bins: bins
           .map((b) => ({ bin: b.bin_location_code, counted: counted.has(b.bin_location_code) }))
-          .sort((a, b) => a.bin.localeCompare(b.bin)),
+          .sort((a, b) => compareBins(a.bin, b.bin)),
       });
     }
 

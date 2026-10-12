@@ -207,7 +207,14 @@ function PiDocsPage() {
                   <td>
                     <input type="checkbox" checked={selected.has(d.id)} onChange={() => toggle(d.id)} />
                   </td>
-                  <td style={{ fontFamily: "monospace" }}>{d.pi_doc_no}</td>
+                  <td style={{ fontFamily: "monospace" }}>
+                    {d.pi_doc_no}
+                    {d.g_floor && (
+                      <span className="badge" style={{ marginLeft: 6, background: "#fef3c7", color: "#92400e" }}>
+                        G-Floor
+                      </span>
+                    )}
+                  </td>
                   <td>{d.warehouse_area_code}</td>
                   <td className="num">{d.binCount}</td>
                   <td>

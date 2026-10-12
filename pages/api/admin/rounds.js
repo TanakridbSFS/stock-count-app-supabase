@@ -2,6 +2,7 @@ import { withAdmin } from "../../../lib/adminAuth";
 import { db, fetchAll } from "../../../lib/stocktake";
 import { applyDefaultTags } from "../../../lib/areaTags";
 import { runAutoAssign } from "../../../lib/autoAssign";
+import { isGFloorBin } from "../../../lib/areaRules";
 import {
   LANES,
   roundLabel,
@@ -144,9 +145,11 @@ async function handler(req, res, admin) {
           });
         }
 
+        // a PI Doc number may repeat in another event, not inside this one
         const { data: clash, error: clashErr } = await supabase
           .from("pi_docs")
           .select("pi_doc_no, count_rounds(lane, round_number)")
+          .eq("stocktake_event_id", eventId)
           .in("pi_doc_no", docs.map((d) => d.piDocNo));
         if (clashErr) throw clashErr;
         if (clash.length) {
@@ -155,7 +158,7 @@ async function handler(req, res, admin) {
             .map((c) => `${c.pi_doc_no} (in ${roundLabel(c.count_rounds.lane, c.count_rounds.round_number)})`)
             .join(", ");
           return res.status(400).json({
-            error: `${clash.length} PI Doc number(s) in the file already exist in the system: ${list}${clash.length > 10 ? "…" : ""}`,
+            error: `${clash.length} PI Doc number(s) in the file already exist in this event: ${list}${clash.length > 10 ? "…" : ""}`,
           });
         }
 
@@ -166,11 +169,23 @@ async function handler(req, res, admin) {
           await deleteRound(round.id);
           throw e;
         }
+        // G-Floor bins (F001 Reserve, code ending -G) should have PI Docs of their own; a mix is allowed but reported
+        const mixedG = docs
+          .filter((d) => {
+            const g = d.bins.filter((b) => isGFloorBin(d.area, b)).length;
+            return g > 0 && g < d.bins.length;
+          })
+          .map((d) => d.piDocNo);
+        const gFloorDocs = docs.filter((d) => d.bins.some((b) => isGFloorBin(d.area, b))).length;
         return res.status(200).json({
           round,
           piDocCount: docs.length,
           binCount: seenBins.size,
           uncoveredBinCount: countBins.length - seenBins.size,
+          gFloorDocCount: gFloorDocs,
+          warnings: mixedG.length
+            ? [`${mixedG.length} PI Doc(s) mix G-floor bins (-G) with other bins: ${mixedG.slice(0, 15).join(", ")}${mixedG.length > 15 ? "…" : ""}. They are handed out as G-Floor PI Docs (last).`]
+            : [],
         });
       }
 
@@ -256,6 +271,18 @@ async function handler(req, res, admin) {
       if (!round) return res.status(404).json({ error: "Round not found" });
 
       if (action === "activate") {
+        // Rounds of two events must not run together (PI Doc numbers repeat across events): the active
+        // rounds of any other event have to be closed first.
+        const { data: others, error: othErr } = await supabase
+          .from("count_rounds")
+          .select("lane, round_number, stocktake_events(name)")
+          .eq("status", "ACTIVE")
+          .neq("stocktake_event_id", round.stocktake_event_id);
+        if (othErr) throw othErr;
+        if (others.length) {
+          const list = others.map((r) => `${r.stocktake_events?.name || "?"} ${roundLabel(r.lane, r.round_number)}`).join(", ");
+          return res.status(409).json({ error: `Close the active round(s) of the other event first: ${list}` });
+        }
         // Close whatever is Active in the same lane first (the partial unique
         // index allows only one ACTIVE round per event + lane).
         const { error: closeErr } = await supabase

@@ -293,3 +293,20 @@ button {
 @media (max-width: 860px) {
   .admin-grid.lanes { grid-template-columns: 1fr; }
 }
+
+/* Scan fields: the cursor stays, the on-screen keyboard only opens from the small button */
+.scan-input { display: flex; gap: 6px; align-items: stretch; }
+.field .scan-input input, .scan-input input { flex: 1; min-width: 0; width: auto; }
+.kbd-btn {
+  flex: 0 0 auto;
+  width: 48px;
+  border: 1px solid #ccc;
+  border-radius: 8px;
+  background: #fff;
+  font-size: 22px;
+  line-height: 1;
+  padding: 0;
+}
+.kbd-btn.on { background: #dbeafe; border-color: #2563eb; }
+.input-invalid, .field input.input-invalid { border-color: #b42318; background: #fef3f2; }
+.field-error { color: #b42318; font-size: 13px; margin-top: 4px; }

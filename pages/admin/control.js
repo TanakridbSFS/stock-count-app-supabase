@@ -107,7 +107,9 @@ function ControlPage() {
       },
       (r) =>
         `Created Count#1: ${r.piDocCount} PI Docs, ${r.binCount} bins.` +
-        (r.uncoveredBinCount ? ` Note: ${r.uncoveredBinCount} COUNT-tagged bins are not in the file.` : "")
+        (r.gFloorDocCount ? ` ${r.gFloorDocCount} G-Floor PI Doc(s) (handed out last).` : "") +
+        (r.uncoveredBinCount ? ` Note: ${r.uncoveredBinCount} COUNT-tagged bins are not in the file.` : "") +
+        (r.warnings && r.warnings.length ? ` Warning: ${r.warnings.join(" ")}` : "")
     );
 
   const createRecount = () =>

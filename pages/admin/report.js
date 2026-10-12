@@ -1,13 +1,14 @@
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import AdminGate from "../../components/AdminGate";
+import { fmtQty, REPORT_MODES } from "../../lib/reportFormat";
 
 const LIMIT = 500;
 
 function ReportPage() {
   const [events, setEvents] = useState([]);
   const [eventId, setEventId] = useState("");
-  const [includePrecount, setIncludePrecount] = useState(false);
+  const [mode, setMode] = useState(""); // "" (--Select--) | COUNT | PRECOUNT | ALL
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
@@ -25,11 +26,14 @@ function ReportPage() {
   }, []);
 
   async function load() {
-    if (!eventId) return;
+    if (!eventId || !mode) {
+      setData(null);
+      return;
+    }
     setLoading(true);
     setError("");
     try {
-      const res = await fetch(`/api/admin/report?eventId=${eventId}&includePrecount=${includePrecount ? 1 : 0}`);
+      const res = await fetch(`/api/admin/report?eventId=${eventId}&mode=${mode}`);
       const json = await res.json();
       if (!res.ok) throw new Error(json.error || "Failed to build report");
       setData(json);
@@ -42,7 +46,7 @@ function ReportPage() {
 
   useEffect(() => {
     load();
-  }, [eventId, includePrecount]);
+  }, [eventId, mode]);
 
   const rows = useMemo(() => {
     const q = search.trim().toLowerCase();
@@ -62,7 +66,7 @@ function ReportPage() {
   const [wmsOnlyDiff, setWmsOnlyDiff] = useState(false);
   const [wmsPreview, setWmsPreview] = useState(null);
   const wmsQuery = () =>
-    `eventId=${eventId}&includePrecount=${includePrecount ? 1 : 0}` +
+    `eventId=${eventId}&mode=${mode}` +
     `&plant=${encodeURIComponent(wmsPlant)}&countDate=${encodeURIComponent(wmsDate)}&onlyDifferences=${wmsOnlyDiff ? 1 : 0}`;
   async function previewWms() {
     setError("");
@@ -119,25 +123,29 @@ function ReportPage() {
             <input value={search} onChange={(e) => setSearch(e.target.value)} />
           </div>
         </div>
-        <label style={{ fontSize: 15, display: "block", marginBottom: 10 }}>
-          <input
-            type="checkbox"
-            checked={includePrecount}
-            onChange={(e) => setIncludePrecount(e.target.checked)}
-            style={{ width: 18, height: 18, marginRight: 8 }}
-          />
-          Include Pre-Count results in this report
-        </label>
-        <button className="btn btn-secondary btn-sm" onClick={load} disabled={loading}>
+        <div className="field">
+          <label>Report type</label>
+          <select value={mode} onChange={(e) => setMode(e.target.value)}>
+            <option value="">--Select--</option>
+            <option value="ALL">{REPORT_MODES.ALL}</option>
+            <option value="COUNT">{REPORT_MODES.COUNT}</option>
+            <option value="PRECOUNT">{REPORT_MODES.PRECOUNT}</option>
+          </select>
+        </div>
+        <button className="btn btn-secondary btn-sm" onClick={load} disabled={loading || !mode}>
           {loading ? "Loading…" : "Refresh"}
         </button>
-        <a
-          className="btn btn-primary btn-sm"
-          style={{ textDecoration: "none" }}
-          href={`/api/admin/report?eventId=${eventId}&includePrecount=${includePrecount ? 1 : 0}&format=csv`}
-        >
-          Download CSV
-        </a>
+        {mode ? (
+          <a
+            className="btn btn-primary btn-sm"
+            style={{ textDecoration: "none" }}
+            href={`/api/admin/report?eventId=${eventId}&mode=${mode}&format=csv`}
+          >
+            Download CSV ({REPORT_MODES[mode]})
+          </a>
+        ) : (
+          <span style={{ fontSize: 14, color: "#92400e" }}>Choose a report type to see the table and download.</span>
+        )}
         {s && (
           <div style={{ marginTop: 12, fontSize: 14 }}>
             Bins counted <b>{s.binsCounted}</b> / {s.binsInScope} · Lines <b>{s.lines}</b> · With difference{" "}
@@ -151,7 +159,7 @@ function ReportPage() {
         <div className="card-subtext">
           One row per Bin + Material + Batch (counted lines only) of the Event selected above, in the layout of the
           WMS count-result file. <b>wmsPiOrderNo</b> = our PI Doc; extra last columns: <b>Bin Location</b>,{" "}
-          <b>Team</b>, <b>Round</b>. Uses the same Pre-Count setting as above.
+          <b>Team</b>, <b>Round</b>. Uses the same report type as above (the SAP upload normally needs Count + Pre-Count).
         </div>
         <div className="field-row">
           <div className="field">
@@ -172,16 +180,18 @@ function ReportPage() {
           />
           Only rows with a difference
         </label>
-        <button className="btn btn-secondary btn-sm" disabled={!eventId} onClick={previewWms}>
+        <button className="btn btn-secondary btn-sm" disabled={!eventId || !mode} onClick={previewWms}>
           Preview
         </button>
-        <a
-          className="btn btn-primary btn-sm"
-          style={{ textDecoration: "none" }}
-          href={`/api/admin/report?${wmsQuery()}&format=wms`}
-        >
-          Download .xlsx
-        </a>
+        {mode && (
+          <a
+            className="btn btn-primary btn-sm"
+            style={{ textDecoration: "none" }}
+            href={`/api/admin/report?${wmsQuery()}&format=wms`}
+          >
+            Download .xlsx ({REPORT_MODES[mode]})
+          </a>
+        )}
         {wmsPreview && (
           <div style={{ marginTop: 12, fontSize: 14 }}>
             <div>
@@ -194,7 +204,7 @@ function ReportPage() {
             ))}
             {wmsPreview.rows.slice(0, 5).map((r, i) => (
               <div key={i} style={{ fontFamily: "monospace", fontSize: 12 }}>
-                {r.wmsPiOrderNo} · {r["Bin Location"]} · {r.Team} · {r.Round} · {r.material} · {r.batch} · count {r["Count QTY"]} · WMS {r["WMS QTY"]} · diff {r.Diff} ·{" "}
+                {r.wmsPiOrderNo} · {r["Bin Location"]} · {r.Team} · {r.Round} · {r.material} · {r.batch} · count {r["Count QTY"]} · WMS {fmtQty(r["WMS QTY"])} · diff {fmtQty(r.Diff)} ·{" "}
                 {r["Is Difference"]}
               </div>
             ))}
@@ -203,6 +213,11 @@ function ReportPage() {
       </div>
 
       <div className="card" style={{ marginTop: 16 }}>
+        {mode && (
+          <div style={{ fontWeight: 700, marginBottom: 8 }}>
+            Report type: {REPORT_MODES[mode]}
+          </div>
+        )}
         <div className="table-scroll">
           <table className="admin-table">
             <thead>
@@ -210,6 +225,7 @@ function ReportPage() {
                 <th>Bin</th>
                 <th>Mat</th>
                 <th>Batch</th>
+                <th>Inv. Status</th>
                 <th>UOM</th>
                 <th className="num">Expected</th>
                 <th className="num">Counted</th>
@@ -226,11 +242,12 @@ function ReportPage() {
                   <td>{r.Bin}</td>
                   <td>{r.Mat}</td>
                   <td>{r.Batch}</td>
+                  <td>{r["Inventory Status"]}</td>
                   <td>{r.UOM}</td>
-                  <td className="num">{r.Expected ?? ""}</td>
-                  <td className="num">{r.Counted ?? ""}</td>
+                  <td className="num">{fmtQty(r.Expected)}</td>
+                  <td className="num">{fmtQty(r.Counted)}</td>
                   <td className="num" style={{ color: r.Diff ? (r.Diff < 0 ? "#b91c1c" : "#b45309") : undefined }}>
-                    {r.Diff ?? ""}
+                    {fmtQty(r.Diff)}
                   </td>
                   <td>{r.Status}</td>
                   <td>{r.Round}</td>
@@ -246,8 +263,8 @@ function ReportPage() {
               ))}
               {rows.length === 0 && (
                 <tr>
-                  <td colSpan={11} style={{ color: "#888" }}>
-                    {loading ? "Loading…" : "No lines."}
+                  <td colSpan={12} style={{ color: "#888" }}>
+                    {loading ? "Loading…" : mode ? "No lines." : "Choose a report type above."}
                   </td>
                 </tr>
               )}

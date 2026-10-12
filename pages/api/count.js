@@ -3,10 +3,13 @@ import { afterPiDocSaved } from "../../lib/autoAssign";
 import { resolvePiDocForTeam, assertBinInPiDoc } from "../../lib/pda";
 import { padBatch } from "../../lib/binMasterConvert";
 import { nowThailandISOString } from "../../lib/time";
+import { normStatus, defaultStatusForNewLine } from "../../lib/inventoryStatus";
 
 // POST /api/count
-// body: { piDocId, counterName (= team name), bin, deviceId, lines: [{ mat, batch, uom, expectedQty, countedQty, lineType }],
-//          removed?: [{ mat, batch }] }
+// body: { piDocId, counterName (= team name), bin, deviceId, lines: [{ mat, batch, status, uom, expectedQty, countedQty, lineType }],
+//          removed?: [{ mat, batch, status }] }
+// status = the Inventory Status (UR / Block / QI) of the Master line the line answers; a NEW / EMPTY line gets
+// its status here (Count: UR, Pre-Count: Block in a Blocked area, else UR).
 // One result per bin per round: each line replaces the saved record with the
 // same (mat, batch); `removed` deletes lines the counter took out.
 export default async function handler(req, res) {
@@ -37,6 +40,10 @@ export default async function handler(req, res) {
 
     const timestamp = nowThailandISOString();
     const rows = lines.map((line) => ({
+      InventoryStatus:
+        line.lineType === "NEW" || line.lineType === "EMPTY"
+          ? defaultStatusForNewLine(round.lane, piDoc.warehouse_area_code)
+          : normStatus(line.status),
       Timestamp: timestamp,
       CounterName: team.name,
       Bin: bin,
@@ -55,7 +62,7 @@ export default async function handler(req, res) {
     await replaceRoundCountRecords(
       { roundId: round.id, piDocId: piDoc.id, teamName: team.name, bin: String(bin).trim() },
       rows,
-      removedLines.map((r) => ({ mat: r.mat || "", batch: padBatch(r.batch) }))
+      removedLines.map((r) => ({ mat: r.mat || "", batch: padBatch(r.batch), status: r.status }))
     );
     // Auto-assign toggle ON: a finished PI Doc frees this team for the next one.
     if (round.auto_assign) {
