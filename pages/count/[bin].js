@@ -1,4 +1,5 @@
 import { useEffect, useState, useCallback, useRef } from "react";
+import { flushSync } from "react-dom";
 import { useRouter } from "next/router";
 import { useSession } from "../../lib/useSession";
 import { padBatch } from "../../lib/binMasterConvert";
@@ -247,8 +248,10 @@ export default function CountBinPage() {
 
   function addNewLine() {
     const line = emptyNewLine();
-    setNewLines((prev) => [...prev, line]);
-    setTimeout(() => document.getElementById(`newline-${line._key}-mat`)?.focus(), 60);
+    // Render now and give the Mat field the cursor inside the same tap: a field focused later by a timer is
+    // not "focused by the user", and with the keyboard kept away the PDA scanner's text does not reach it.
+    flushSync(() => setNewLines((prev) => [...prev, line]));
+    document.getElementById(`newline-${line._key}-mat`)?.focus({ preventScroll: true });
   }
 
   // A combo scan (Mat|Batch|Qty) lands in Mat or Batch: fill every field. If
