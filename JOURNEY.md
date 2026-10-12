@@ -170,3 +170,9 @@ W10 add (user): the WMS-format export gets one extra column 'PI Doc' (our own PI
   - G-Floor (migration 008, pi_docs.g_floor): F001 Reserve bins ending -G; flag only, handed out last by auto-assign, Picking and Reserve teams of F001 alike; Count#1 upload warns on a mixed PI Doc; replaces the old "level G counts as Picking" rule.
   - Inventory Status UR/Block/QI (migration 009, count_records.inventory_status): one PDA line per status with a badge, automatic status for new lines (Count UR; Pre-Count Block in Blocked areas), report and SAP file per status (stockType UR 1, QI 2, Block 4); expected lines now grouped from bin_master_raw (same as the bin_master_grouped view, status kept).
   - TV Progress page (/admin/tv, GET /api/admin/tv): one screen, tabs per storage location, team cards, Top 5 fastest / Top 10 slowest by avg time per bin, Light/Dark, 30 s refresh.
+
+## 2026-10-12 — TV Progress: Inactive, Reserve/Picking frames, Auto slide (NOT committed)
+- Teams are Working / Idle (switched on, nothing to count) / Inactive (switched off, nothing to count); the KPI shows all three, Idle names are listed, Inactive only counted. Both follow the Storage Location tab by the team's capabilities.
+- Inside a Storage Location tab (F001, C001, C002, D001) Reserve and Picking each get their own frame with a header (percent, bins, teams); All stays one grid. API: cards carry `kind`, `groups` = totals per "Storage|KIND", `inactiveTeams`.
+- Auto mode: checkbox + seconds (3-600) in the header, steps through All > F001 > ... and round again, a thin bar shows the time left, a manual tab click restarts the wait; saved in localStorage `tv_auto`.
+- Test data: event Progress_Demo (3,423 bins, 427 PI Docs, 63% simulated, device_id SIM-*) created for looking at the Progress page.

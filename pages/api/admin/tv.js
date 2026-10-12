@@ -51,7 +51,7 @@ async function handler(req, res) {
       docs = await fetchAll(() =>
         supabase
           .from("pi_docs")
-          .select("id, pi_doc_no, count_round_id, warehouse_area_code, sap_storage_location, assigned_team_id, g_floor")
+          .select("id, pi_doc_no, count_round_id, warehouse_area_code, sap_storage_location, assigned_team_id, zone_type, g_floor")
           .in("count_round_id", roundIds)
           .order("id")
       );
@@ -60,7 +60,7 @@ async function handler(req, res) {
       docs = await fetchAll(() =>
         supabase
           .from("pi_docs")
-          .select("id, pi_doc_no, count_round_id, warehouse_area_code, sap_storage_location, assigned_team_id")
+          .select("id, pi_doc_no, count_round_id, warehouse_area_code, sap_storage_location, assigned_team_id, zone_type")
           .in("count_round_id", roundIds)
           .order("id")
       );
@@ -107,6 +107,8 @@ async function handler(req, res) {
     // ---- totals per Storage Location (and ALL), team cards, idle teams
     const blank = () => ({ bins: 0, counted: 0, docsTotal: 0, docsDone: 0, docsInProgress: 0, docsFree: 0, teams: new Set() });
     const total = { ALL: blank() };
+    const groups = {}; // "F001|RESERVE" -> totals of that Storage Location + kind of area
+    const kindOf = (d) => (d.zone_type === "PICKING" || d.zone_type === "RESERVE" ? d.zone_type : /reserve/i.test(d.warehouse_area_code || "") ? "RESERVE" : /picking/i.test(d.warehouse_area_code || "") ? "PICKING" : "OTHER");
     const cards = [];
     const busyTeams = new Set();
     for (const d of docs) {
@@ -114,7 +116,9 @@ async function handler(req, res) {
       const loc = d.sap_storage_location || "?";
       const t = (total[loc] ||= blank());
       const done = p.bins > 0 && p.counted >= p.bins;
-      for (const bucket of [total.ALL, t]) {
+      const kind = kindOf(d);
+      const g = (groups[`${loc}|${kind}`] ||= blank());
+      for (const bucket of [total.ALL, t, g]) {
         bucket.bins += p.bins;
         bucket.counted += Math.min(p.counted, p.bins);
         bucket.docsTotal += 1;
@@ -127,7 +131,9 @@ async function handler(req, res) {
         busyTeams.add(d.assigned_team_id);
         total.ALL.teams.add(d.assigned_team_id);
         t.teams.add(d.assigned_team_id);
+        g.teams.add(d.assigned_team_id);
         cards.push({
+          kind,
           team: team ? team.name : "?",
           piDoc: d.pi_doc_no,
           round: labelOf[d.count_round_id],
@@ -140,13 +146,18 @@ async function handler(req, res) {
       }
     }
     cards.sort((a, b) => a.team.localeCompare(b.team, "en", { numeric: true }));
+    // idle = switched on but nothing to count; inactive = switched off and nothing to count
     const idleTeams = teamsRes.data
       .filter((t) => t.active && !busyTeams.has(t.id))
+      .map((t) => ({ name: t.name, locs: locsOfTeam[t.id] || [] }));
+    const inactiveTeams = teamsRes.data
+      .filter((t) => !t.active && !busyTeams.has(t.id))
       .map((t) => ({ name: t.name, locs: locsOfTeam[t.id] || [] }));
     const locations = Object.keys(total).filter((k) => k !== "ALL").sort();
     const totals = Object.fromEntries(
       Object.entries(total).map(([k, v]) => [k, { ...v, teams: v.teams.size }])
     );
+    const groupTotals = Object.fromEntries(Object.entries(groups).map(([k, v]) => [k, { ...v, teams: v.teams.size }]));
 
     // ---- time per bin per team, per Storage Location of the PI Doc
     const saves = new Map(); // pi_doc|bin -> last save
@@ -189,8 +200,10 @@ async function handler(req, res) {
       ...out,
       locations,
       totals,
+      groups: groupTotals,
       cards,
       idleTeams,
+      inactiveTeams,
       ranking,
       minSamples: MIN_SAMPLES,
       breakMin: BREAK_SEC / 60,
