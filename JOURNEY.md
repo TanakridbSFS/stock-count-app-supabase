@@ -176,3 +176,8 @@ W10 add (user): the WMS-format export gets one extra column 'PI Doc' (our own PI
 - Inside a Storage Location tab (F001, C001, C002, D001) Reserve and Picking each get their own frame with a header (percent, bins, teams); All stays one grid. API: cards carry `kind`, `groups` = totals per "Storage|KIND", `inactiveTeams`.
 - Auto mode: checkbox + seconds (3-600) in the header, steps through All > F001 > ... and round again, a thin bar shows the time left, a manual tab click restarts the wait; saved in localStorage `tv_auto`.
 - Test data: event Progress_Demo (3,423 bins, 427 PI Docs, 63% simulated, device_id SIM-*) created for looking at the Progress page.
+
+## 2026-10-12 — PDA scan fields: keyboard hiding broke the scanner (NOT committed)
+- Found on the PDA: with `inputMode="none"` the scanner text never reaches the field (Enter still arrives as a key, so the cursor jumped on); with the keyboard button on, scanning is correct. The scanner types through the keyboard app (IME).
+- `components/ScanInput.js`: default scan mode is now "manual" = `virtualkeyboardpolicy="manual"` + `navigator.virtualKeyboard.show()/hide()` (keyboard stays away on focus, the field is a normal input). Fallbacks per device with `?scan=none` (old inputMode none) or `?scan=normal` (nothing hidden); the choice is remembered in localStorage `scan_mode`. Needs a test on the real PDA.
+- `pages/count/[bin].js`: a Mat|Batch|Qty barcode typed one character at a time used to lose its "|" (digits-only filter) and the Mat field stayed empty. Text with a "|" is now kept as typed and applied on Enter, or 350 ms after the last character; the field shows no error while it holds a combo. Verified in headless Chrome (char by char + Enter, and pasted at once without Enter).

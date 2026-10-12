@@ -103,6 +103,7 @@ export default function CountBinPage() {
   // status: 'unanswered' | 'correct' | 'wrong'
   const [edits, setEdits] = useState({});
   const [newLines, setNewLines] = useState([]);
+  const comboTimer = useRef(null); // a combo barcode typed one character at a time is applied when it stops
   const [saving, setSaving] = useState(false);
   const initialisedBin = useRef(null);
   const [focusTab, setFocusTab] = useState("ALL"); // recount: which focus SKU is on screen
@@ -264,6 +265,29 @@ export default function CountBinPage() {
     });
     if (done) focusAddButton();
     else setTimeout(() => document.getElementById(`newline-${nl._key}-qty`)?.focus(), 60);
+  }
+
+  // Mat or Batch text with a "|" in it is a Mat|Batch|Qty barcode: keep it as typed (a scanner may type it one
+  // character at a time) and apply it on Enter, or when no more characters come for a moment.
+  function onComboText(idx, nl, field, raw) {
+    const text = String(raw).replace(/[^0-9|.]/g, "");
+    updateNewLine(idx, { [field]: text, warnMat: "", warnBatch: "" });
+    clearTimeout(comboTimer.current);
+    comboTimer.current = setTimeout(() => {
+      const combo = parseComboScan(text);
+      if (combo) applyCombo(idx, nl, combo);
+    }, 350);
+  }
+
+  // Enter in Mat or Batch while the text is a combo barcode: apply it now. Returns true if it did.
+  function applyComboNow(idx, nl, text) {
+    clearTimeout(comboTimer.current);
+    const combo = parseComboScan(text);
+    if (combo) {
+      applyCombo(idx, nl, combo);
+      return true;
+    }
+    return false;
   }
 
   // "Done" / Enter on Counted Qty: close the line into its compact view.
@@ -776,15 +800,14 @@ export default function CountBinPage() {
                     keyboard="numeric"
                     pattern="[0-9]*"
                     value={nl.mat}
-                    invalid={!!(matError(nl.mat) || nl.warnMat)}
+                    invalid={!!((!nl.mat.includes("|") && matError(nl.mat)) || nl.warnMat)}
                     onChange={(e) => {
                       const raw = e.target.value;
                       // A combo barcode (Mat|Batch|Qty) fills every field.
-                      const combo = parseComboScan(raw);
-                      if (combo) return applyCombo(idx, nl, combo);
+                      if (raw.includes("|")) return onComboText(idx, nl, "mat", raw);
                       const mat = digitsOnly(raw);
                       // More than 8 digits is refused (not kept) and the field says why.
-                      if (!raw.includes("|") && mat.length > MAT_LENGTH) {
+                      if (mat.length > MAT_LENGTH) {
                         updateNewLine(idx, { warnMat: `Mat ต้องไม่เกิน ${MAT_LENGTH} หลัก` });
                         return;
                       }
@@ -802,11 +825,12 @@ export default function CountBinPage() {
                       // Scanner Enter after Mat → jump to Batch.
                       if (e.key === "Enter") {
                         e.preventDefault();
+                        if (nl.mat.includes("|") && applyComboNow(idx, nl, nl.mat)) return;
                         document.getElementById(`newline-${nl._key}-batch`)?.focus();
                       }
                     }}
                   />
-                  {(matError(nl.mat) || nl.warnMat) && <div className="field-error">{nl.warnMat || matError(nl.mat)}</div>}
+                  {((!nl.mat.includes("|") && matError(nl.mat)) || nl.warnMat) && <div className="field-error">{nl.warnMat || matError(nl.mat)}</div>}
                 </div>
                 <div className="field">
                   <label>Batch (ตัวเลข ไม่เกิน {BATCH_LENGTH} หลัก)</label>
@@ -815,33 +839,33 @@ export default function CountBinPage() {
                     keyboard="numeric"
                     pattern="[0-9]*"
                     value={nl.batch}
-                    invalid={!!(batchError(nl.batch) || nl.warnBatch)}
+                    invalid={!!((!nl.batch.includes("|") && batchError(nl.batch)) || nl.warnBatch)}
                     onChange={(e) => {
                       const raw = e.target.value;
                       // In case a combo barcode lands in Batch instead of Mat.
-                      const combo = parseComboScan(raw);
-                      if (combo) return applyCombo(idx, nl, combo);
+                      if (raw.includes("|")) return onComboText(idx, nl, "batch", raw);
                       const batch = digitsOnly(raw);
                       // More than 10 digits is refused (not kept) and the field says why.
-                      if (!raw.includes("|") && batch.length > BATCH_LENGTH) {
+                      if (batch.length > BATCH_LENGTH) {
                         updateNewLine(idx, { warnBatch: `Batch ต้องไม่เกิน ${BATCH_LENGTH} หลัก` });
                         return;
                       }
                       updateNewLine(idx, { batch, warnBatch: "" });
                     }}
                     // Batch is always stored as 10 digits (0000000001).
-                    onBlur={() => nl.batch && updateNewLine(idx, { batch: padBatch(nl.batch) })}
+                    onBlur={() => nl.batch && !nl.batch.includes("|") && updateNewLine(idx, { batch: padBatch(nl.batch) })}
                     onKeyDown={(e) => {
                       // Skip the UOM dropdown (manually chosen, not scanned) —
                       // go straight to Counted Qty.
                       if (e.key === "Enter") {
                         e.preventDefault();
+                        if (nl.batch.includes("|") && applyComboNow(idx, nl, nl.batch)) return;
                         updateNewLine(idx, { batch: padBatch(nl.batch) });
                         document.getElementById(`newline-${nl._key}-qty`)?.focus();
                       }
                     }}
                   />
-                  {(batchError(nl.batch) || nl.warnBatch) && <div className="field-error">{nl.warnBatch || batchError(nl.batch)}</div>}
+                  {((!nl.batch.includes("|") && batchError(nl.batch)) || nl.warnBatch) && <div className="field-error">{nl.warnBatch || batchError(nl.batch)}</div>}
                 </div>
                 <div className="field">
                   <label>UOM</label>
