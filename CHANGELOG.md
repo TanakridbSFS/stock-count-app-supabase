@@ -8,7 +8,7 @@ adds a line here, so a screen on a PDA can always be matched to the code and to 
 
 | Version | Commit | What changed |
 |---|---|---|
-| 2.5.1 | _this commit_ | Icons on the PDA buttons: Change PI Doc (back), Switch Team (person with arrows), Refresh list, Review & Finish Bin (`>`), Confirm & Save (`>>`); README brought up to v2.5 with the User Journey (Counter, Admin) |
+| 2.5.1 | 57db69b | Icons on the PDA buttons: Change PI Doc (back), Switch Team (person with arrows), Refresh list, Review & Finish Bin (`>`), Confirm & Save (`>>`); README brought up to v2.5 with the User Journey (Counter, Admin) |
 | 2.5.0 | 93560c3 | PI Doc number unique in the whole system (migration 010); Pre-Count rounds are created from the same PI Doc file as Count#1 (no auto-generated Pre-Count PI Docs); Teams page: Pre-Count Storage Location per team (read from the PRECOUNT areas of the Bin Location Master), enforced in auto-assign, manual assign and on the PDA; Consolidated Report opens on Count + Pre-Count and downloads as CSV or Excel; all test counts, PI Docs and rounds wiped |
 | 2.4.1 | d190578 | Mat name (from the Master of the event) under the Mat field, on the scanned lines and in the Summary, in Checklist and Blind Count and Pre-Count; `/api/mat-names` |
 | 2.4.0 | 4759be4 | Count#1: Checklist / Blind switch next to the Bin title (default Blind for D001, Checklist for the others; the server compares scanned lines with the Master: MATCH / ADJUSTED / ZERO, else NEW, status UR); a new empty line opens with the cursor on Mat after each finished line; PI Doc status icons (Pending / In Progress / Done) on the PDA PI Doc list and emoji on the Progress page |
