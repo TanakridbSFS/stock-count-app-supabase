@@ -207,3 +207,7 @@ W10 add (user): the WMS-format export gets one extra column 'PI Doc' (our own PI
 - Pre-Count rounds are created from the same PI Doc file as Count#1 (Location + PI Doc No.), no auto-generated Pre-Count PI Docs. The clash check looks at every event and names the event that already holds the number. Only Count#2+ is still auto-generated, numbered after the highest number used anywhere.
 - Teams page: new column "Pre-Count Storage Location" (options = Storage Locations of the PRECOUNT-tagged areas of the Bin Location Master: C001, C002, D001, F001, W001, Z001-Z003). Enforced in auto-assign, manual assign (admin PI Docs) and on the PDA; a team with none gets no Pre-Count work (Count rule: Storage Location x Picking/Reserve, unchanged).
 - Consolidated Report opens on "Count + Pre-Count" (one download).
+
+## 2026-10-13 — v2.5.1 button icons and README (NOT committed)
+- `components/BtnIcon.js`: icons on Change PI Doc (back), Switch Team (person with arrows, on /scan and /join), Refresh list, Review & Finish Bin (>), Confirm & Save (>>). Colours follow the button (CSS variable --ico-fg). Checked in headless Chrome (screenshots).
+- README: v2.5 rules (PI Doc number unique system-wide, Pre-Count from file, Pre-Count capability, report Count + Pre-Count with CSV and Excel, migration 010) and two User Journeys (Counter, Admin).

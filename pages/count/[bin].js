@@ -4,6 +4,7 @@ import { useRouter } from "next/router";
 import { useSession } from "../../lib/useSession";
 import { padBatch } from "../../lib/binMasterConvert";
 import MATERIAL_UOM from "../../lib/materialUom.json";
+import { NextIcon, NextNextIcon } from "../../components/BtnIcon";
 import ScanInput from "../../components/ScanInput";
 import { UOM_OPTIONS } from "../../lib/uomOptions";
 import { MAT_LENGTH, BATCH_LENGTH, matError, batchError, qtyError, blockQtyKeys } from "../../lib/validate";
@@ -856,8 +857,9 @@ export default function CountBinPage() {
           ))}
 
           <div className="footer-actions">
-            <button className="btn btn-primary" disabled={saving} onClick={() => submitLines(pendingLines, true)}>
-              {saving ? "Saving…" : "Confirm & Save"}
+            <button className="btn btn-primary btn-with-icon" disabled={saving} onClick={() => submitLines(pendingLines, true)}>
+              <span>{saving ? "Saving…" : "Confirm & Save"}</span>
+              {!saving && <NextNextIcon />}
             </button>
             <button className="btn btn-secondary" disabled={saving} onClick={() => setShowSummary(false)}>
               Back to Edit
@@ -1085,8 +1087,9 @@ export default function CountBinPage() {
                 {saving ? "Saving…" : "Save & Next Page"}
               </button>
             ) : (
-              <button className="btn btn-primary" disabled={saving} onClick={handleReviewBeforeFinish}>
-                Review & Finish Bin
+              <button className="btn btn-primary btn-with-icon" disabled={saving} onClick={handleReviewBeforeFinish}>
+                <span>Review & Finish Bin</span>
+                <NextIcon />
               </button>
             )}
             <button className="btn btn-secondary" onClick={() => router.push("/scan")}>

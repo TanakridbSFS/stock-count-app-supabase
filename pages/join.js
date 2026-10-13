@@ -3,6 +3,7 @@ import { piDocState, StateIcon, STATE_COLOR, STATE_LABEL } from "../components/P
 import { useRouter } from "next/router";
 import { useSession } from "../lib/useSession";
 import ScanInput from "../components/ScanInput";
+import { RefreshIcon, SwitchUserIcon } from "../components/BtnIcon";
 
 // Between team login (/) and bin scanning (/scan): pick one of the PI Docs
 // assigned to this team in a currently ACTIVE round (tap it, or scan the
@@ -135,11 +136,13 @@ export default function JoinPiDocPage() {
         );
       })}
 
-      <button className="btn btn-secondary" onClick={load}>
-        Refresh list
+      <button className="btn btn-secondary btn-with-icon" onClick={load}>
+        <RefreshIcon />
+        <span>Refresh list</span>
       </button>
-      <button className="btn btn-secondary" onClick={() => router.push("/")}>
-        Switch Team
+      <button className="btn btn-secondary btn-with-icon" onClick={() => router.push("/")}>
+        <SwitchUserIcon />
+        <span>Switch Team</span>
       </button>
     </div>
   );

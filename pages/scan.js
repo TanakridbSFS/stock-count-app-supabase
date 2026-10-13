@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/router";
 import { useSession } from "../lib/useSession";
 import ScanInput from "../components/ScanInput";
+import { BackIcon, SwitchUserIcon } from "../components/BtnIcon";
 
 export default function ScanPage() {
   const router = useRouter();
@@ -111,11 +112,13 @@ export default function ScanPage() {
           ))}
         </div>
       )}
-      <button className="btn btn-secondary" onClick={() => router.push("/join")}>
-        Change PI Doc
+      <button className="btn btn-secondary btn-with-icon" onClick={() => router.push("/join")}>
+        <BackIcon />
+        <span>Change PI Doc</span>
       </button>
-      <button className="btn btn-secondary" onClick={() => router.push("/")}>
-        Switch Team
+      <button className="btn btn-secondary btn-with-icon" onClick={() => router.push("/")}>
+        <SwitchUserIcon />
+        <span>Switch Team</span>
       </button>
     </div>
   );

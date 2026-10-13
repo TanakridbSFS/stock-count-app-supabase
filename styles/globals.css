@@ -51,8 +51,10 @@ button {
   margin-bottom: 10px;
   text-align: center;
 }
-.btn-primary { background: #2563eb; color: white; }
-.btn-secondary { background: #e5e7eb; color: #111; }
+.btn-primary { background: #2563eb; color: white; --ico-fg: #2563eb; }
+.btn-secondary { background: #e5e7eb; color: #111; --ico-fg: #e5e7eb; }
+.btn-with-icon { display: flex; align-items: center; justify-content: center; gap: 10px; }
+.btn-ico { flex: none; }
 .btn-danger { background: #dc2626; color: white; }
 .btn-warn { background: #f59e0b; color: white; }
 .btn-correct { background: #16a34a; color: white; }
