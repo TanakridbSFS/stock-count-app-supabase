@@ -4,6 +4,7 @@ import { db } from "../../../lib/stocktake";
 import { roundLabel } from "../../../lib/rounds";
 import { padBatch } from "../../../lib/binMasterConvert";
 import { normStatus, defaultStatusForNewLine } from "../../../lib/inventoryStatus";
+import { canBlindCount, blindByDefault } from "../../../lib/countMode";
 
 // Recount (Count#2+): the SKUs the admin picked for the round, merged from the Bin
 // Master and the earlier Count results of this bin (so a line Count#1 found that the
@@ -118,6 +119,9 @@ export default async function handler(req, res) {
       // Block in a Blocked area, UR otherwise) — shown on the PDA, set again by the server on save
       area: piDoc.warehouse_area_code || "",
       newLineStatus: defaultStatusForNewLine(round.lane, piDoc.warehouse_area_code),
+      // Count#1 only: the counter may switch between Checklist and Blind Count (default by Storage Location)
+      canBlind: canBlindCount(round),
+      blindDefault: blindByDefault(round, piDoc),
       knownBin,
       total,
       page,

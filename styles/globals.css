@@ -313,3 +313,9 @@ button {
 
 /* version tag at the bottom of every page */
 .version-tag { text-align: center; font-size: 11px; color: #8a97a5; padding: 6px 8px 10px; }
+
+/* Bin title with the Checklist / Blind switch */
+.title-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.mode-switch { display: inline-flex; border: 2px solid #2563eb; border-radius: 999px; overflow: hidden; flex: 0 0 auto; }
+.mode-switch button { border: 0; background: #fff; color: #1d4ed8; font-size: 13px; font-weight: 700; padding: 6px 12px; cursor: pointer; }
+.mode-switch button.on { background: #2563eb; color: #fff; }

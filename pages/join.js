@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { piDocState, StateIcon, STATE_COLOR, STATE_LABEL } from "../components/PiDocStatus";
 import { useRouter } from "next/router";
 import { useSession } from "../lib/useSession";
 import ScanInput from "../components/ScanInput";
@@ -108,22 +109,31 @@ export default function JoinPiDocPage() {
         </div>
       )}
 
-      {(piDocs || []).map((d) => (
-        <button
-          key={d.id}
-          className={`btn ${session.piDocId === d.id ? "btn-primary" : "btn-secondary"}`}
-          onClick={() => choose(d)}
-          style={{ textAlign: "left" }}
-        >
-          <div style={{ fontWeight: 700 }}>
-            {d.piDocNo} · {d.roundLabel}
-          </div>
-          <div style={{ fontSize: 14, fontWeight: 400 }}>
-            {d.area} · {d.binsCounted}/{d.binCount} bins counted
-            {d.binCount > 0 && d.binsCounted >= d.binCount ? " ✓ Done" : ""}
-          </div>
-        </button>
-      ))}
+      {(piDocs || []).map((d) => {
+        const st = piDocState(d.binsCounted, d.binCount);
+        const col = STATE_COLOR[st];
+        return (
+          <button
+            key={d.id}
+            className={`btn ${session.piDocId === d.id ? "btn-primary" : "btn-secondary"}`}
+            onClick={() => choose(d)}
+            style={{ textAlign: "left", display: "flex", alignItems: "center", gap: 10, borderLeft: `6px solid ${col.line}` }}
+          >
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <div style={{ fontWeight: 700 }}>
+                {d.piDocNo} · {d.roundLabel}
+              </div>
+              <div style={{ fontSize: 14, fontWeight: 400 }}>
+                {d.area} · {d.binsCounted}/{d.binCount} bins counted
+              </div>
+            </div>
+            <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 2, minWidth: 64, padding: "4px 6px", borderRadius: 8, background: col.bg, color: col.fg }}>
+              <StateIcon state={st} size={26} />
+              <span style={{ fontSize: 11, fontWeight: 700 }}>{STATE_LABEL[st]}</span>
+            </div>
+          </button>
+        );
+      })}
 
       <button className="btn btn-secondary" onClick={load}>
         Refresh list

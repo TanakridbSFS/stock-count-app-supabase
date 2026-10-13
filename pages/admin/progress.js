@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import { piDocState, STATE_EMOJI } from "../../components/PiDocStatus";
 import Link from "next/link";
 import AdminGate from "../../components/AdminGate";
 
@@ -188,7 +189,7 @@ function ProgressPage() {
                             background: d.binsCounted >= d.binCount && d.binCount > 0 ? "#dcfce7" : d.binsCounted > 0 ? "#fef3c7" : "#f3f4f6",
                           }}
                         >
-                          {d.pi_doc_no} {d.binsCounted}/{d.binCount}
+                          {STATE_EMOJI[piDocState(d.binsCounted, d.binCount)]} {d.pi_doc_no} {d.binsCounted}/{d.binCount}
                         </span>
                       ))}
                     </td>

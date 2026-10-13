@@ -130,6 +130,10 @@ export default function CountBinPage() {
   const [newLines, setNewLines] = useState([]);
   const dirty = useRef(false); // the counter changed something on this bin (a draft is kept)
   const [draftInfo, setDraftInfo] = useState(null); // a draft was restored: { at }
+  // Count#1: Checklist (Correct / Wrong against the Master) or Blind Count (scan only). null = the default of the
+  // Storage Location (D001 = Blind). Pre-Count is always blind.
+  const [blindChoice, setBlindChoice] = useState(null);
+  const blindMode = !!(data?.blind || (data?.canBlind && (blindChoice ?? data.blindDefault)));
   const comboTimer = useRef(null); // a combo barcode typed one character at a time is applied when it stops
   const [saving, setSaving] = useState(false);
   const initialisedBin = useRef(null);
@@ -200,7 +204,7 @@ export default function CountBinPage() {
         initialisedBin.current = bin;
         setNewLines(
           json.saved
-            .filter((r) => r.lineType === "NEW")
+            .filter((r) => (json.canBlind && json.blindDefault ? r.lineType !== "EMPTY" : r.lineType === "NEW"))
             .map((r) => ({
               ...emptyNewLine(),
               mat: r.mat,
@@ -219,6 +223,7 @@ export default function CountBinPage() {
           setEdits((prev) => ({ ...prev, ...(draft.edits || {}) }));
           setNewLines(Array.isArray(draft.newLines) ? draft.newLines : []);
           setConfirmedEmpty(!!draft.confirmedEmpty);
+          setBlindChoice(typeof draft.blindChoice === "boolean" ? draft.blindChoice : null);
           dirty.current = true;
           setDraftInfo({ at: draft.savedAt });
         }
@@ -239,18 +244,19 @@ export default function CountBinPage() {
     if (!dirty.current || !bin || !session?.piDocId) return;
     const t = setTimeout(() => {
       try {
-        localStorage.setItem(draftKey(session.piDocId, bin), JSON.stringify({ savedAt: Date.now(), edits, newLines, confirmedEmpty }));
+        localStorage.setItem(draftKey(session.piDocId, bin), JSON.stringify({ savedAt: Date.now(), edits, newLines, confirmedEmpty, blindChoice }));
       } catch {}
     }, 300);
     return () => clearTimeout(t);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [edits, newLines, confirmedEmpty]);
+  }, [edits, newLines, confirmedEmpty, blindChoice]);
 
   function discardDraft() {
     clearDraft(session.piDocId, bin);
     dirty.current = false;
     setDraftInfo(null);
     setEdits({});
+    setBlindChoice(null);
     initialisedBin.current = null;
     load();
   }
@@ -305,13 +311,40 @@ export default function CountBinPage() {
     setTimeout(() => document.getElementById("add-new-line-btn")?.focus(), 60);
   }
 
+  function focusNewLine(line) {
+    const el = document.getElementById(`newline-${line._key}-mat`);
+    el?.focus({ preventScroll: true });
+    el?.scrollIntoView({ block: "center" });
+  }
+
   function addNewLine() {
     dirty.current = true;
+    // an empty line is already open at the end: just go to it
+    const last = newLines[newLines.length - 1];
+    if (last && last.editing && !last.mat && !last.batch && !last.countedQty) {
+      focusNewLine(last);
+      return;
+    }
     const line = emptyNewLine();
     // Render now and give the Mat field the cursor inside the same tap: a field focused later by a timer is
     // not "focused by the user", and with the keyboard kept away the PDA scanner's text does not reach it.
     flushSync(() => setNewLines((prev) => [...prev, line]));
-    document.getElementById(`newline-${line._key}-mat`)?.focus({ preventScroll: true });
+    focusNewLine(line);
+  }
+
+  // A finished line closes. When it was the last one, a fresh empty line opens under it with the cursor on Mat
+  // so the next barcode can be scanned right away (an empty line left at the end is ignored on save).
+  function closeLine(idx, patch) {
+    dirty.current = true;
+    setError("");
+    if (idx !== newLines.length - 1) {
+      updateNewLine(idx, { ...patch, editing: false });
+      focusAddButton();
+      return;
+    }
+    const line = emptyNewLine();
+    flushSync(() => setNewLines((prev) => [...prev.map((l, i) => (i === idx ? { ...l, ...patch, editing: false } : l)), line]));
+    focusNewLine(line);
   }
 
   // A combo scan (Mat|Batch|Qty) lands in Mat or Batch: fill every field. With a Qty (and a unit known for the
@@ -321,11 +354,11 @@ export default function CountBinPage() {
     const known = !!masterUomFor(mat);
     const complete = combo.qty !== "" && known;
     const uom = masterUomFor(mat) || "";
-    updateNewLine(idx, { mat, batch: combo.batch, uom, ...(combo.qty !== "" ? { countedQty: combo.qty } : {}), ...(complete ? { editing: false } : {}) });
     if (complete) {
-      focusAddButton();
+      closeLine(idx, { mat, batch: combo.batch, uom, countedQty: combo.qty });
       return;
     }
+    updateNewLine(idx, { mat, batch: combo.batch, uom, ...(combo.qty !== "" ? { countedQty: combo.qty } : {}) });
     const next = !known && mat.length >= MAT_LENGTH ? "uom" : "qty";
     setTimeout(() => document.getElementById(`newline-${nl._key}-${next}`)?.focus({ preventScroll: true }), 60);
   }
@@ -362,9 +395,7 @@ export default function CountBinPage() {
       if (/หน่วย/.test(bad)) document.getElementById(`newline-${nl._key}-uom`)?.focus({ preventScroll: true });
       return;
     }
-    setError("");
-    updateNewLine(idx, { batch: padBatch(nl.batch), uom: lineUom(nl), editing: false });
-    focusAddButton();
+    closeLine(idx, { batch: padBatch(nl.batch), uom: lineUom(nl) });
   }
 
   // Builds + validates the list of lines that would be saved right now.
@@ -372,7 +403,7 @@ export default function CountBinPage() {
   function buildLinesToSave() {
     const lines = [];
 
-    for (const l of data.lines) {
+    for (const l of blindMode ? [] : data.lines) {
       const k = lineKey(l);
       const e = edits[k] || { status: "unanswered", countedQty: "" };
       if (e.status === "unanswered") {
@@ -452,7 +483,7 @@ export default function CountBinPage() {
 
     // Bin has no expected items and the counter confirmed there's nothing
     // here — log that as its own record instead of forcing a fake "New Line".
-    if (data.knownBin === false && confirmedEmpty) {
+    if ((data.knownBin === false || blindMode) && confirmedEmpty && (data.knownBin === false || lines.length === 0)) {
       lines.push({
         mat: "",
         matName: "",
@@ -466,8 +497,8 @@ export default function CountBinPage() {
 
     if (lines.length === 0 && computeRemoved(lines).length === 0) {
       setError(
-        data.blind
-          ? "Nothing to save yet — add a new line for each item you find."
+        blindMode
+          ? "Nothing to save yet — scan the items you find, or confirm \"Nothing Found\"."
           : data.knownBin === false
           ? "Nothing to save yet — tap \"Confirm — Nothing Found\" or add a new line."
           : "Nothing to save yet — answer at least one line (Correct/Wrong) or add a new line."
@@ -524,6 +555,7 @@ export default function CountBinPage() {
           deviceId: session.deviceId,
           bin,
           lines,
+          blind: blindMode && !!data.canBlind, // Count#1 Blind Count: the server compares the scanned lines with the Master
           removed: computeRemoved(lines),
         }),
       });
@@ -685,7 +717,33 @@ export default function CountBinPage() {
 
   return (
     <div className="page">
-      <div className="title">Bin: {bin}</div>
+      <div className="title-row">
+        <div className="title">Bin: {bin}</div>
+        {data?.canBlind && (
+          <div className="mode-switch" role="group" aria-label="Count mode">
+            <button
+              type="button"
+              className={!blindMode ? "on" : ""}
+              onClick={() => {
+                dirty.current = true;
+                setBlindChoice(false);
+              }}
+            >
+              Checklist
+            </button>
+            <button
+              type="button"
+              className={blindMode ? "on" : ""}
+              onClick={() => {
+                dirty.current = true;
+                setBlindChoice(true);
+              }}
+            >
+              Blind
+            </button>
+          </div>
+        )}
+      </div>
       <div className="banner banner-info">{session.counterName} — PI Doc {session.piDocNo}</div>
 
       {lastSaved && (
@@ -700,6 +758,12 @@ export default function CountBinPage() {
           Pre-Count — add a new line for every item you find in this bin.
           {data.area ? ` Area ${data.area}: items are saved as ` : ""}
           {data.area && <StatusBadge status={data.newLineStatus} />}
+        </div>
+      )}
+      {blindMode && !data?.blind && (
+        <div className="banner banner-info">
+          Blind Count — scan every item you find in this bin; the Master quantity is not shown. Scanned items are saved as{" "}
+          <StatusBadge status={data?.newLineStatus} />. (Switch to Checklist to answer Correct / Wrong instead.)
         </div>
       )}
       {draftInfo && (
@@ -742,7 +806,9 @@ export default function CountBinPage() {
                   </div>
                 </>
               )}
-              <span className={`badge badge-${l.lineType.toLowerCase()}`}>{l.lineType}</span>
+              <span className={`badge badge-${l.lineType.toLowerCase()}`}>
+                {blindMode && data?.canBlind && l.lineType === "NEW" ? "SCANNED" : l.lineType}
+              </span>
               {l.merged > 1 && (
                 <span style={{ marginLeft: 8, fontSize: 12, color: "#667085" }}>
                   {l.merged} lines with the same Mat + Batch added together
@@ -782,10 +848,10 @@ export default function CountBinPage() {
           {error && <div className="banner banner-warn">{error}</div>}
           {loading && <div>Loading…</div>}
 
-          {data && !data.knownBin && (
+          {data && (!data.knownBin || blindMode) && (
             <div className="card">
-              <div className="banner banner-warn" style={{ marginBottom: 10 }}>
-                This bin has no expected items in the master data.
+              <div className={`banner ${blindMode ? "banner-info" : "banner-warn"}`} style={{ marginBottom: 10 }}>
+                {blindMode ? "Nothing in this bin? Confirm it here." : "This bin has no expected items in the master data."}
               </div>
               {!confirmedEmpty ? (
                 <button className="btn btn-correct btn-sm" onClick={() => { dirty.current = true; setConfirmedEmpty(true); }}>
@@ -805,7 +871,7 @@ export default function CountBinPage() {
             </div>
           )}
 
-          {data && data.total > 0 && (
+          {data && data.total > 0 && !blindMode && (
             <div className="field" style={{ display: "flex", gap: 8, alignItems: "center" }}>
               <label style={{ margin: 0 }}>Rows per page</label>
               <select
@@ -852,7 +918,7 @@ export default function CountBinPage() {
             </div>
           )}
 
-          {data?.lines
+          {!blindMode && data?.lines
             .filter((l) => !data.recount || focusTab === "ALL" || String(l.Mat) === focusTab)
             .map((l) => {
             const k = lineKey(l);
@@ -991,7 +1057,7 @@ export default function CountBinPage() {
           </button>
 
           <div className="footer-actions">
-            {data && data.page < data.totalPages ? (
+            {data && !blindMode && data.page < data.totalPages ? (
               <button className="btn btn-primary" disabled={saving} onClick={handleSaveAndNextPage}>
                 {saving ? "Saving…" : "Save & Next Page"}
               </button>

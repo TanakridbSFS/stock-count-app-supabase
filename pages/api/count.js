@@ -1,4 +1,5 @@
-import { replaceRoundCountRecords } from "../../lib/db";
+import { replaceRoundCountRecords, getBinLines } from "../../lib/db";
+import { canBlindCount } from "../../lib/countMode";
 import { afterPiDocSaved } from "../../lib/autoAssign";
 import { resolvePiDocForTeam, assertBinInPiDoc } from "../../lib/pda";
 import { padBatch } from "../../lib/binMasterConvert";
@@ -17,7 +18,7 @@ export default async function handler(req, res) {
     return res.status(405).json({ error: "Method not allowed" });
   }
 
-  const { piDocId, counterName, bin, deviceId, lines, removed } = req.body || {};
+  const { piDocId, counterName, bin, deviceId, lines, removed, blind } = req.body || {};
   const removedLines = Array.isArray(removed) ? removed : [];
 
   if (!piDocId || !counterName || !bin || !Array.isArray(lines) || (lines.length === 0 && removedLines.length === 0)) {
@@ -33,13 +34,41 @@ export default async function handler(req, res) {
 
   try {
     // The team must own the PI Doc, its round must be ACTIVE, and the bin must be in the PI Doc.
-    const [{ team, piDoc, round }] = await Promise.all([
+    const [{ team, piDoc, round, event }] = await Promise.all([
       resolvePiDocForTeam(piDocId, counterName),
       assertBinInPiDoc(piDocId, bin),
     ]);
 
+    // Blind Count (Count#1): the counter scanned what is in the bin without seeing the Master. A scanned line that
+    // is a UR line of the Master (same Mat + Batch) is compared with it here: expected quantity kept, MATCH /
+    // ADJUSTED / ZERO; anything else stays NEW. Nothing is added for Master lines that were not scanned.
+    let toSave = lines;
+    if (blind === true && canBlindCount(round)) {
+      const masterUr = new Map();
+      for (const m of await getBinLines(event.bin_master_file_id, String(bin).trim())) {
+        if (normStatus(m.Status) !== "UR") continue;
+        const k = `${m.Mat}|${padBatch(m.Batch)}`;
+        const cur = masterUr.get(k) || { qty: 0, uom: m.UOM };
+        cur.qty += Number(m.Qty) || 0;
+        masterUr.set(k, cur);
+      }
+      toSave = lines.map((line) => {
+        if (line.lineType !== "NEW") return line;
+        const m = masterUr.get(`${line.mat}|${padBatch(line.batch)}`);
+        if (!m) return line;
+        const counted = Number(line.countedQty);
+        return {
+          ...line,
+          status: "UR",
+          uom: m.uom || line.uom,
+          expectedQty: m.qty,
+          lineType: counted === 0 ? "ZERO" : counted === m.qty ? "MATCH" : "ADJUSTED",
+        };
+      });
+    }
+
     const timestamp = nowThailandISOString();
-    const rows = lines.map((line) => ({
+    const rows = toSave.map((line) => ({
       InventoryStatus:
         line.lineType === "NEW" || line.lineType === "EMPTY"
           ? defaultStatusForNewLine(round.lane, piDoc.warehouse_area_code)
