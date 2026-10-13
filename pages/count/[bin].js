@@ -134,6 +134,14 @@ export default function CountBinPage() {
   // Storage Location (D001 = Blind). Pre-Count is always blind.
   const [blindChoice, setBlindChoice] = useState(null);
   const blindMode = !!(data?.blind || (data?.canBlind && (blindChoice ?? data.blindDefault)));
+  // Mat names as in the Master (for the lines the counter scanned): mat -> name, "" = not in the Master
+  const [names, setNames] = useState({});
+  const askedMats = useRef(new Set());
+  const nameOf = (m) => names[m] ?? (data?.lines || []).find((l) => String(l.Mat) === String(m))?.MatName;
+  const nameText = (m) => {
+    const n = nameOf(m);
+    return n === undefined ? "…" : n || "— ไม่พบชื่อใน Master";
+  };
   const comboTimer = useRef(null); // a combo barcode typed one character at a time is applied when it stops
   const [saving, setSaving] = useState(false);
   const initialisedBin = useRef(null);
@@ -250,6 +258,20 @@ export default function CountBinPage() {
     return () => clearTimeout(t);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [edits, newLines, confirmedEmpty, blindChoice]);
+
+  useEffect(() => {
+    if (!data || !session?.piDocId) return;
+    const mats = [...new Set(newLines.map((l) => l.mat).filter((m) => /^\d{8}$/.test(m)))].filter(
+      (m) => !(m in names) && !askedMats.current.has(m) && !(data.lines || []).some((l) => String(l.Mat) === m && l.MatName)
+    );
+    if (!mats.length) return;
+    mats.forEach((m) => askedMats.current.add(m));
+    fetch(`/api/mat-names?piDocId=${encodeURIComponent(session.piDocId)}&teamName=${encodeURIComponent(session.counterName)}&mats=${mats.join(",")}`)
+      .then((r) => r.json())
+      .then((j) => j.names && setNames((p) => ({ ...p, ...j.names })))
+      .catch(() => mats.forEach((m) => askedMats.current.delete(m)));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [newLines, data]);
 
   function discardDraft() {
     clearDraft(session.piDocId, bin);
@@ -471,7 +493,7 @@ export default function CountBinPage() {
       }
       lines.push({
         mat: nl.mat,
-        matName: "",
+        matName: nameOf(nl.mat) || "",
         batch: padBatch(nl.batch),
         status: nl.status || data.newLineStatus, // the server sets it again (Count: UR, Pre-Count: by area)
         uom: lineUom(nl),
@@ -619,6 +641,7 @@ export default function CountBinPage() {
             }}
           />
           {((!nl.mat.includes("|") && matError(nl.mat)) || nl.warnMat) && <div className="field-error">{nl.warnMat || matError(nl.mat)}</div>}
+          {/^\d{8}$/.test(nl.mat) && <div style={{ fontSize: 13, marginTop: 4, color: nameOf(nl.mat) ? "#344054" : "#667085" }}>{nameText(nl.mat)}</div>}
         </div>
         <div className="field">
           <label>Batch (ตัวเลข ไม่เกิน {BATCH_LENGTH} หลัก)</label>
@@ -1037,7 +1060,7 @@ export default function CountBinPage() {
             ) : (
               <div className="card" key={nl._key}>
                 <span className="badge badge-new">NEW</span> <StatusBadge status={nl.status || data?.newLineStatus} />
-                <div className="card-row"><span>Mat</span><b>{nl.mat}</b></div>
+                <div className="card-row"><span>Mat</span><b>{nl.mat}{nameOf(nl.mat) ? ` — ${nameOf(nl.mat)}` : ""}</b></div>
                 <div className="card-row"><span>Batch</span><b>{padBatch(nl.batch) || "—"}</b></div>
                 <div className="card-row"><span>Counted</span><b>{nl.countedQty} <UomText uom={lineUom(nl)} /></b></div>
                 <div style={{ marginTop: 10 }}>
