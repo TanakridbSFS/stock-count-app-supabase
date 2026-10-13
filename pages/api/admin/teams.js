@@ -3,12 +3,13 @@ import { db } from "../../../lib/stocktake";
 import { AREA_TYPES, areaTypeOf } from "../../../lib/capabilities";
 import { releaseUnstartedDocs, runAutoAssignEverywhere } from "../../../lib/autoAssign";
 
-// Team master + permanent capabilities (COUNT lane only). A team may count
+// Team master + permanent capabilities (Count: locations x types; Pre-Count: locations). A team may count
 // the cross product of its storage locations x its types (Picking / Reserve).
 //   GET    -> { teams: [{ id, name, active, locations: ["F001"], types: ["PICKING"] }], storageLocations: [...] }
 //   POST   { action: "add", name }                      add one team (TeamNN)
 //   POST   { action: "bulk", from, to }                 add Team<from>..Team<to> (skips existing)
-//   PATCH  { teamId, locations: [...], types: [...] }   replace the team's capability
+//   PATCH  { teamId, locations, types, precountLocations }  replace the team's capability (precountLocations =
+//                                                       Storage Locations the team may Pre-Count)
 //   PATCH  { teamId, active: boolean }                  present / absent today. Inactive: cannot log in on a PDA,
 //                                                       its not-yet-started PI Docs go back to the pool, and
 //                                                       auto-assign refills idle teams
@@ -41,14 +42,20 @@ async function handler(req, res) {
       );
       caps.forEach((c) => c.sap_storage_locations.forEach((l) => locs.add(l)));
 
+      // Pre-Count: the Storage Locations of the PRECOUNT-tagged areas (C001-Blocked, Z001-Sample Frozen, ...)
+      const preLocs = new Set(defs.filter((d) => d.classification === "PRECOUNT").map((d) => d.sap_storage_location));
+      caps.forEach((c) => (c.precount_locations || []).forEach((l) => preLocs.add(l)));
+
       const capByTeam = Object.fromEntries(caps.map((c) => [c.team_id, c]));
       return res.status(200).json({
         teams: teams.map((t) => ({
           ...t,
           locations: capByTeam[t.id]?.sap_storage_locations || [],
           types: capByTeam[t.id]?.area_types || [],
+          precountLocations: capByTeam[t.id]?.precount_locations || [],
         })),
         storageLocations: Array.from(locs).sort(),
+        precountStorageLocations: Array.from(preLocs).sort(),
       });
     }
 
@@ -84,7 +91,7 @@ async function handler(req, res) {
     }
 
     if (req.method === "PATCH") {
-      const { teamId, locations, types, active } = req.body || {};
+      const { teamId, locations, types, active, precountLocations } = req.body || {};
       if (teamId && typeof active === "boolean") {
         const { error: aErr } = await supabase.from("teams").update({ active }).eq("id", teamId);
         if (aErr) throw aErr;
@@ -92,8 +99,8 @@ async function handler(req, res) {
         const assigned = await runAutoAssignEverywhere();
         return res.status(200).json({ ok: true, released, assigned: assigned.length });
       }
-      if (!teamId || !Array.isArray(locations) || !Array.isArray(types)) {
-        return res.status(400).json({ error: "Missing teamId, locations or types" });
+      if (!teamId || !Array.isArray(locations) || !Array.isArray(types) || !Array.isArray(precountLocations)) {
+        return res.status(400).json({ error: "Missing teamId, locations, types or precountLocations" });
       }
       if (types.some((t) => !AREA_TYPES.includes(t))) {
         return res.status(400).json({ error: "Type must be PICKING or RESERVE" });
@@ -103,6 +110,7 @@ async function handler(req, res) {
           team_id: teamId,
           sap_storage_locations: [...new Set(locations.map((l) => String(l).trim()).filter(Boolean))],
           area_types: [...new Set(types)],
+          precount_locations: [...new Set(precountLocations.map((l) => String(l).trim()).filter(Boolean))],
           updated_at: new Date().toISOString(),
         },
         { onConflict: "team_id" }

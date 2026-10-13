@@ -8,6 +8,7 @@ import { postJson } from "../../lib/adminUpload";
 function TeamsPage() {
   const [teams, setTeams] = useState([]);
   const [locations, setLocations] = useState([]);
+  const [preLocations, setPreLocations] = useState([]);
   const [from, setFrom] = useState("1");
   const [to, setTo] = useState("58");
   const [newName, setNewName] = useState("");
@@ -24,6 +25,7 @@ function TeamsPage() {
     }
     setTeams(json.teams);
     setLocations(json.storageLocations);
+    setPreLocations(json.precountStorageLocations);
   }
 
   useEffect(() => {
@@ -65,7 +67,7 @@ function TeamsPage() {
 
   function setCap(team, patch) {
     // optimistic update, then persist
-    const next = { locations: team.locations, types: team.types, ...patch };
+    const next = { locations: team.locations, types: team.types, precountLocations: team.precountLocations, ...patch };
     setTeams((ts) => ts.map((t) => (t.id === team.id ? { ...t, ...next } : t)));
     run(() => postJson("/api/admin/teams", "PATCH", { teamId: team.id, ...next }));
   }
@@ -180,10 +182,11 @@ function TeamsPage() {
           </button>
         </div>
         <div className="card-subtext">
-          Count rounds only. A team may count every combination of its Storage
+          <b>Count</b>: a team may count every combination of its Storage
           Locations × Types — e.g. <b>Team01 | F001, C001 | Picking, Reserve</b>{" "}
-          means F001 Picking, F001 Reserve, C001 Picking and C001 Reserve.
-          Pre-Count is never restricted. <b>Active</b> = present today: an inactive team cannot log in on a PDA
+          means F001 Picking, F001 Reserve, C001 Picking and C001 Reserve.{" "}
+          <b>Pre-Count</b>: the Storage Locations the team may Pre-Count (the Blocked / Sample / other areas of the
+          Bin Location Master); a team with none gets no Pre-Count PI Docs. <b>Active</b> = present today: an inactive team cannot log in on a PDA
           and receives no auto-assigned work. Changes save immediately.
         </div>
         <div className="table-scroll" style={{ minHeight: 260 }}>
@@ -194,6 +197,7 @@ function TeamsPage() {
                 <th>Active</th>
                 <th>Storage Location</th>
                 <th>Picking / Reserve</th>
+                <th>Pre-Count Storage Location</th>
                 <th></th>
               </tr>
             </thead>
@@ -222,6 +226,13 @@ function TeamsPage() {
                     />
                   </td>
                   <td>
+                    <MultiSelect
+                      options={preLocations.map((l) => ({ value: l, label: l }))}
+                      value={t.precountLocations}
+                      onChange={(v) => setCap(t, { precountLocations: v })}
+                    />
+                  </td>
+                  <td>
                     <button className="btn btn-secondary btn-sm" onClick={() => removeTeam(t)}>
                       Remove
                     </button>
@@ -230,7 +241,7 @@ function TeamsPage() {
               ))}
               {teams.length === 0 && (
                 <tr>
-                  <td colSpan={5} style={{ color: "#888" }}>
+                  <td colSpan={6} style={{ color: "#888" }}>
                     No teams yet — create Team01–Team58 above.
                   </td>
                 </tr>

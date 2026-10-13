@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { useRouter } from "next/router";
 import Link from "next/link";
 import AdminGate from "../../components/AdminGate";
-import { canTeamCount } from "../../lib/capabilities";
+import { canTeamWork } from "../../lib/capabilities";
 import { postJson } from "../../lib/adminUpload";
 
 function PiDocsPage() {
@@ -87,14 +87,11 @@ function PiDocsPage() {
     (d) =>
       (filter === "ALL" || !d.assigned_team_id) && (areaFilter === "ALL" || d.warehouse_area_code === areaFilter)
   );
-  // COUNT lane: only teams allowed to count every selected PI Doc can be picked.
+  // only teams allowed to count every selected PI Doc can be picked (Count and Pre-Count capabilities).
   const selectedDocs = (data?.piDocs || []).filter((d) => selected.has(d.id));
-  const restricted = data?.round.lane === "COUNT";
-  const eligible = (t) =>
-    !restricted ||
-    selectedDocs.every((d) =>
-      canTeamCount({ sap_storage_locations: t.locations, area_types: t.types }, d)
-    );
+  const lane = data?.round.lane;
+  const capOf = (t) => ({ sap_storage_locations: t.locations, area_types: t.types, precount_locations: t.precountLocations });
+  const eligible = (t) => selectedDocs.every((d) => canTeamWork(lane, capOf(t), d));
   const allSelected = docs.length > 0 && docs.every((d) => selected.has(d.id));
   const toggle = (id) =>
     setSelected((s) => {
@@ -128,14 +125,16 @@ function PiDocsPage() {
                 {data.teams.map((t) => (
                   <option key={t.id} value={t.id} disabled={!eligible(t)}>
                     {t.name}
-                    {t.locations.length ? ` (${t.locations.join(",")} | ${t.types.join(",").toLowerCase()})` : ""}
+                    {lane === "PRECOUNT"
+                      ? t.precountLocations.length ? ` (${t.precountLocations.join(",")})` : ""
+                      : t.locations.length ? ` (${t.locations.join(",")} | ${t.types.join(",").toLowerCase()})` : ""}
                     {eligible(t) ? "" : " — not allowed"}
                   </option>
                 ))}
               </select>
-              {restricted && (
+              {lane && (
                 <div style={{ fontSize: 12, color: "#6b7280" }}>
-                  Count round: only teams allowed to count the selected Warehouse Area(s) can be chosen.
+                  Only teams allowed to count the selected Storage Location / Warehouse Area(s) can be chosen (set on the Teams page).
                 </div>
               )}
             </div>
@@ -229,7 +228,7 @@ function PiDocsPage() {
                     >
                       <option value="">unassigned</option>
                       {data.teams
-                        .filter((t) => t.id === d.assigned_team_id || canTeamCount({ sap_storage_locations: t.locations, area_types: t.types }, d) || !restricted)
+                        .filter((t) => t.id === d.assigned_team_id || canTeamWork(lane, capOf(t), d))
                         .map((t) => (
                           <option key={t.id} value={t.id}>
                             {t.name}

@@ -8,7 +8,7 @@ const LIMIT = 500;
 function ReportPage() {
   const [events, setEvents] = useState([]);
   const [eventId, setEventId] = useState("");
-  const [mode, setMode] = useState(""); // "" (--Select--) | COUNT | PRECOUNT | ALL
+  const [mode, setMode] = useState("ALL"); // ALL (Count + Pre-Count in one report, the default) | COUNT | PRECOUNT | "" (--Select--)
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
@@ -145,6 +145,15 @@ function ReportPage() {
           </a>
         ) : (
           <span style={{ fontSize: 14, color: "#92400e" }}>Choose a report type to see the table and download.</span>
+        )}
+        {mode && (
+          <a
+            className="btn btn-primary btn-sm"
+            style={{ textDecoration: "none" }}
+            href={`/api/admin/report?eventId=${eventId}&mode=${mode}&format=xlsx`}
+          >
+            Download Excel ({REPORT_MODES[mode]})
+          </a>
         )}
         {s && (
           <div style={{ marginTop: 12, fontSize: 14 }}>

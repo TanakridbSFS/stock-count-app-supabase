@@ -1,6 +1,6 @@
 import { withAdmin } from "../../../lib/adminAuth";
 import { db, fetchAll } from "../../../lib/stocktake";
-import { canTeamCount } from "../../../lib/capabilities";
+import { canTeamWork } from "../../../lib/capabilities";
 import { compareBins } from "../../../lib/binSort";
 
 // GET   ?roundId=...   PI Docs of a round with team, bin counts and counting progress
@@ -60,6 +60,7 @@ async function handler(req, res) {
         ...t,
         locations: capByTeam[t.id]?.sap_storage_locations || [],
         types: capByTeam[t.id]?.area_types || [],
+        precountLocations: capByTeam[t.id]?.precount_locations || [],
       }));
       const teamName = Object.fromEntries(teams.map((t) => [t.id, t.name]));
 
@@ -95,10 +96,10 @@ async function handler(req, res) {
         return res.status(409).json({ error: "This round is CLOSED — its PI Docs are locked." });
       }
 
-      // COUNT lane: the team must be allowed to count the PI Doc's area.
-      // Pre-Count is not restricted.
+      // The team must be allowed to count the PI Doc's area (Count lane: Storage Location x Picking/Reserve;
+      // Pre-Count lane: Storage Location in the team's Pre-Count list).
       if (teamId) {
-        const countRounds = new Set(rounds.filter((r) => r.lane === "COUNT").map((r) => r.id));
+        const laneOf = Object.fromEntries(rounds.map((r) => [r.id, r.lane]));
         const { data: cap, error: cErr } = await supabase
           .from("team_capabilities")
           .select("*")
@@ -108,9 +109,13 @@ async function handler(req, res) {
         const mismatches = docs
           .filter(
             (d) =>
-              countRounds.has(d.count_round_id) &&
-              !canTeamCount(
-                cap && { sap_storage_locations: cap.sap_storage_locations, area_types: cap.area_types },
+              !canTeamWork(
+                laneOf[d.count_round_id],
+                cap && {
+                  sap_storage_locations: cap.sap_storage_locations,
+                  area_types: cap.area_types,
+                  precount_locations: cap.precount_locations,
+                },
                 d
               )
           )

@@ -200,3 +200,10 @@ W10 add (user): the WMS-format export gets one extra column 'PI Doc' (our own PI
 
 ## 2026-10-13 — v2.4.1 Mat name on scanned lines (NOT committed)
 - `/api/mat-names` (team + PI Doc checked like the bin screen) returns `sku_name` from the Master of the PI Doc's event; the counting screen shows it under the Mat field (8 digits), on the finished scanned line and in the Summary (Count Checklist, Blind Count, Pre-Count). A Mat that is not in the Master shows "ไม่พบชื่อใน Master". No quantity is involved, so Blind Count stays blind.
+
+## 2026-10-13 — v2.5.0 unique PI Doc numbers, Pre-Count from file, Pre-Count capability (NOT committed)
+- All test data wiped (count_records 6,731, PI Docs 921, rounds 10; events, bins, teams, Master kept). 134 PI Doc numbers had been shared by several events, so the unique rule needed an empty table.
+- Migration 010: unique index on `pi_docs(pi_doc_no)` (system-wide, replaces the per-event one of 008) and `team_capabilities.precount_locations`. Run it BEFORE deploying the code (the PDA reads the new column).
+- Pre-Count rounds are created from the same PI Doc file as Count#1 (Location + PI Doc No.), no auto-generated Pre-Count PI Docs. The clash check looks at every event and names the event that already holds the number. Only Count#2+ is still auto-generated, numbered after the highest number used anywhere.
+- Teams page: new column "Pre-Count Storage Location" (options = Storage Locations of the PRECOUNT-tagged areas of the Bin Location Master: C001, C002, D001, F001, W001, Z001-Z003). Enforced in auto-assign, manual assign (admin PI Docs) and on the PDA; a team with none gets no Pre-Count work (Count rule: Storage Location x Picking/Reserve, unchanged).
+- Consolidated Report opens on "Count + Pre-Count" (one download).

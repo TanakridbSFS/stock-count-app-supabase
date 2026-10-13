@@ -1,14 +1,15 @@
 # Changelog
 
 The number in `package.json` (`version`) is the app version. It is shown at the bottom of every page as
-`v2.4.1 · <commit> · <build time>` (Thai time), in the TV page header, and at `/api/version`.
+`v2.5.0 · <commit> · <build time>` (Thai time), in the TV page header, and at `/api/version`.
 
 Rule: every push to `main` bumps the number (patch `x.y.Z` for a fix, minor `x.Y.0` for a new feature) and
 adds a line here, so a screen on a PDA can always be matched to the code and to the commit.
 
 | Version | Commit | What changed |
 |---|---|---|
-| 2.4.1 | _this commit_ | Mat name (from the Master of the event) under the Mat field, on the scanned lines and in the Summary, in Checklist and Blind Count and Pre-Count; `/api/mat-names` |
+| 2.5.0 | _this commit_ | PI Doc number unique in the whole system (migration 010); Pre-Count rounds are created from the same PI Doc file as Count#1 (no auto-generated Pre-Count PI Docs); Teams page: Pre-Count Storage Location per team (read from the PRECOUNT areas of the Bin Location Master), enforced in auto-assign, manual assign and on the PDA; Consolidated Report opens on Count + Pre-Count and downloads as CSV or Excel; all test counts, PI Docs and rounds wiped |
+| 2.4.1 | d190578 | Mat name (from the Master of the event) under the Mat field, on the scanned lines and in the Summary, in Checklist and Blind Count and Pre-Count; `/api/mat-names` |
 | 2.4.0 | 4759be4 | Count#1: Checklist / Blind switch next to the Bin title (default Blind for D001, Checklist for the others; the server compares scanned lines with the Master: MATCH / ADJUSTED / ZERO, else NEW, status UR); a new empty line opens with the cursor on Mat after each finished line; PI Doc status icons (Pending / In Progress / Done) on the PDA PI Doc list and emoji on the Progress page |
 | 2.3.1 | 054ebf9 | Back to the "+ Add New Line" button at the bottom and the old look of the counting screen (the always-open scan box of 2.3.0 is removed); the rest of 2.3.0 stays |
 | 2.3.0 | 431705b | PDA counting screen: permanent scan box at the top for new items (Count and Pre-Count) with the newest line first (removed in 2.3.1); unfinished work is kept on the device (draft) until the bin is saved; a Mat that is not in Master_UOM gives a warning and a unit picker instead of a block; Exp. Date removed; Inventory Status of new lines (UR / Block) shown on the PDA. Includes 2.2.0 |

@@ -22,8 +22,8 @@ function ControlPage() {
   const [error, setError] = useState("");
   const [msg, setMsg] = useState("");
   const [busy, setBusy] = useState(false);
-  const [piFile, setPiFile] = useState(null);
-  const [piPreview, setPiPreview] = useState(""); // what the chosen file contains
+  const [piFiles, setPiFiles] = useState({ PRECOUNT: null, COUNT: null }); // the PI Doc file chosen per lane
+  const [piPreviews, setPiPreviews] = useState({ PRECOUNT: "", COUNT: "" }); // what the chosen file contains
   const [skuText, setSkuText] = useState("");
 
   useEffect(() => {
@@ -64,16 +64,17 @@ function ControlPage() {
     }
   }
 
-  async function choosePiFile(file) {
-    setPiFile(file);
-    setPiPreview("");
+  async function choosePiFile(l, file) {
+    const setPreview = (t) => setPiPreviews((p) => ({ ...p, [l]: t }));
+    setPiFiles((f) => ({ ...f, [l]: file }));
+    setPreview("");
     if (!file) return;
     try {
       const rows = await parsePiDocFile(file);
       const docs = new Set(rows.map((r) => String(r.piDoc).trim()));
-      setPiPreview(`${rows.length} bins in ${docs.size} PI Docs found in the file.`);
+      setPreview(`${rows.length} bins in ${docs.size} PI Docs found in the file.`);
     } catch (e) {
-      setPiPreview(`Cannot read the file: ${e.message}`);
+      setPreview(`Cannot read the file: ${e.message}`);
     }
   }
 
@@ -94,15 +95,21 @@ function ControlPage() {
 
   const createPrecount = () =>
     act(
-      () => postJson("/api/admin/rounds", "POST", { eventId, lane: "PRECOUNT" }),
-      (r) => `Created a Pre-Count round: ${r.piDocCount} PI Docs for ${r.binCount} bins. Assign them to teams next.`
+      async () => {
+        if (!piFiles.PRECOUNT) throw new Error("Choose the PI Doc assignment file first.");
+        const piDocRows = await parsePiDocFile(piFiles.PRECOUNT);
+        return postJson("/api/admin/rounds", "POST", { eventId, lane: "PRECOUNT", piDocRows });
+      },
+      (r) =>
+        `Created a Pre-Count round: ${r.piDocCount} PI Docs, ${r.binCount} bins. Assign them to teams next.` +
+        (r.uncoveredBinCount ? ` Note: ${r.uncoveredBinCount} PRECOUNT-tagged bins are not in the file.` : "")
     );
 
   const createCount1 = () =>
     act(
       async () => {
-        if (!piFile) throw new Error("Choose the PI Doc assignment file first.");
-        const piDocRows = await parsePiDocFile(piFile);
+        if (!piFiles.COUNT) throw new Error("Choose the PI Doc assignment file first.");
+        const piDocRows = await parsePiDocFile(piFiles.COUNT);
         return postJson("/api/admin/rounds", "POST", { eventId, lane: "COUNT", piDocRows });
       },
       (r) =>
@@ -193,34 +200,26 @@ function ControlPage() {
           Activating a round closes the other round in this lane and locks its PI Docs.
         </div>
 
-        {l === "PRECOUNT" && (
+        {(l === "PRECOUNT" || (l === "COUNT" && countRounds.length === 0)) && (
           <div style={{ marginTop: 14 }}>
             <div className="card-subtext">
-              A new Pre-Count round takes every bin in PRECOUNT-tagged areas and auto-builds one PI Doc per bin
-              (1 team : 1 bin), numbered Pre-202610XXXX (from round 2: Pre-202610XXXX-2).
-            </div>
-            <button className="btn btn-primary btn-sm" disabled={busy || !eventId} onClick={createPrecount}>
-              Create Pre-Count{list.length + 1}
-            </button>
-          </div>
-        )}
-
-        {l === "COUNT" && countRounds.length === 0 && (
-          <div style={{ marginTop: 14 }}>
-            <div className="card-subtext">
-              Count#1 uses the PI Doc assignment file (columns <b>Location</b> and <b>PI Doc No.</b>; one row per bin, bins
-              sharing a PI Doc No. form one PI Doc, each PI Doc inside one Warehouse Area). PI Doc numbers are used as
-              written.{" "}
+              {l === "PRECOUNT" ? "A Pre-Count round" : "Count#1"} uses the PI Doc assignment file (columns <b>Location</b> and{" "}
+              <b>PI Doc No.</b>; one row per bin, bins sharing a PI Doc No. form one PI Doc, each PI Doc inside one
+              Warehouse Area). PI Doc numbers are used as written and must not exist anywhere in the system yet.{" "}
               <button className="btn btn-secondary btn-sm" onClick={downloadPiDocTemplate}>
                 Download template
               </button>
             </div>
             <div className="field">
-              <input type="file" accept=".xlsx,.xls" onChange={(e) => choosePiFile(e.target.files?.[0] || null)} />
-              {piPreview && <div style={{ fontSize: 13, marginTop: 4 }}>{piPreview}</div>}
+              <input type="file" accept=".xlsx,.xls" onChange={(e) => choosePiFile(l, e.target.files?.[0] || null)} />
+              {piPreviews[l] && <div style={{ fontSize: 13, marginTop: 4 }}>{piPreviews[l]}</div>}
             </div>
-            <button className="btn btn-primary btn-sm" disabled={busy || !eventId || !piFile} onClick={createCount1}>
-              Create Count#1 from file
+            <button
+              className="btn btn-primary btn-sm"
+              disabled={busy || !eventId || !piFiles[l]}
+              onClick={l === "PRECOUNT" ? createPrecount : createCount1}
+            >
+              {l === "PRECOUNT" ? `Create Pre-Count${list.length + 1} from file` : "Create Count#1 from file"}
             </button>
           </div>
         )}

@@ -5,7 +5,7 @@ import { toCsv } from "../../../lib/csv";
 import * as XLSX from "xlsx";
 import { buildWmsExport, WMS_COLUMNS, stampForFilename } from "../../../lib/wmsExport";
 
-// GET /api/admin/report?eventId=...&mode=ALL|COUNT|PRECOUNT&format=csv   (includePrecount=1 = mode ALL, old links)
+// GET /api/admin/report?eventId=...&mode=ALL|COUNT|PRECOUNT&format=csv|xlsx   (includePrecount=1 = mode ALL, old links)
 // GET /api/admin/report?eventId=...&format=wms          WMS YEAR_COUNT_RESULT layout (.xlsx)
 //      &plant=1102&countDate=YYYYMMDD&onlyDifferences=1
 // GET /api/admin/report?eventId=...&format=wms-preview  the same rows as JSON (+ warnings)
@@ -58,6 +58,25 @@ async function handler(req, res) {
         `attachment; filename="ConsolidatedReport_${REPORT_MODE_TAG[mode]}.csv"`
       );
       return res.status(200).send(csv);
+    }
+    if (format === "xlsx") {
+      const aoa = [REPORT_COLUMNS, ...rows.map((r) => REPORT_COLUMNS.map((c) => r[c] ?? ""))];
+      const ws = XLSX.utils.aoa_to_sheet(aoa);
+      // quantities are numbers with 3 decimals (5.000); the stored value keeps every decimal
+      for (const col of ["Expected", "Counted", "Diff"]) {
+        const c = REPORT_COLUMNS.indexOf(col);
+        if (c < 0) continue;
+        for (let r = 1; r < aoa.length; r++) {
+          const cell = ws[XLSX.utils.encode_cell({ r, c })];
+          if (cell && cell.t === "n") cell.z = "0.000";
+        }
+      }
+      const wb = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(wb, ws, "Consolidated");
+      const buf = XLSX.write(wb, { type: "buffer", bookType: "xlsx" });
+      res.setHeader("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
+      res.setHeader("Content-Disposition", `attachment; filename="ConsolidatedReport_${REPORT_MODE_TAG[mode]}.xlsx"`);
+      return res.status(200).send(buf);
     }
     res.status(200).json({ rows, summary, mode });
   } catch (err) {

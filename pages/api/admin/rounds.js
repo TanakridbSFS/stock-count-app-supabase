@@ -17,8 +17,10 @@ import {
 export const config = { api: { bodyParser: { sizeLimit: "4mb" } } };
 
 // GET    ?eventId=...   rounds of an event (+ PI Doc counts)
-// POST   { eventId, lane: "PRECOUNT" }                         new Pre-Count round, PI Docs auto-generated
+// POST   { eventId, lane: "PRECOUNT", piDocRows: [{location, piDoc}] }   new Pre-Count round from the uploaded PI Doc file
 // POST   { eventId, lane: "COUNT", piDocRows: [{location, piDoc}] }   Count#1 from the uploaded PI Doc file
+// A PI Doc number is unique in the whole system (migration 010) and always comes from the uploaded file,
+// except Count#2+ (auto-generated, numbered after the highest number ever used).
 // POST   { eventId, lane: "COUNT", skus: ["..."] }             Count#2+ recount, PI Docs auto-generated
 // PATCH  { roundId, action: "activate" | "close" }
 // PATCH  { roundId, action: "auto_assign" }              one pass: every idle active team gets one PI Doc
@@ -63,39 +65,23 @@ async function handler(req, res, admin) {
       await applyDefaultTags(eventId);
       await assertClassificationComplete(eventId);
 
-      // ---- Pre-Count: every PRECOUNT-tagged bin, auto-generated ----
-      if (lane === "PRECOUNT") {
-        const bins = await getBinsByClassification(eventId, "PRECOUNT");
-        if (bins.length === 0) {
-          return res.status(400).json({ error: "No bins are tagged PRECOUNT for this event." });
-        }
-        const round = await createRound({ eventId, lane, createdBy: admin.name });
-        try {
-          const piDocCount = await autoGeneratePiDocs(round, bins);
-          return res.status(200).json({ round, piDocCount, binCount: bins.length });
-        } catch (e) {
-          await deleteRound(round.id);
-          throw e;
-        }
-      }
-
-      // ---- Count lane ----
+      // ---- the lane's rounds so far, and its bins ----
       const { count: existing, error: exErr } = await supabase
         .from("count_rounds")
         .select("id", { count: "exact", head: true })
         .eq("stocktake_event_id", eventId)
-        .eq("lane", "COUNT");
+        .eq("lane", lane);
       if (exErr) throw exErr;
-      const countBins = await getBinsByClassification(eventId, "COUNT");
+      const countBins = await getBinsByClassification(eventId, lane);
       if (countBins.length === 0) {
-        return res.status(400).json({ error: "No bins are tagged COUNT for this event." });
+        return res.status(400).json({ error: `No bins are tagged ${lane} for this event.` });
       }
       const binInfo = new Map(countBins.map((b) => [b.code, b]));
 
-      if (existing === 0) {
-        // Count#1 — PI Docs come from the uploaded file.
+      if (lane === "PRECOUNT" || existing === 0) {
+        // Pre-Count rounds and Count#1 — PI Docs come from the uploaded file.
         if (!Array.isArray(piDocRows) || piDocRows.length === 0) {
-          return res.status(400).json({ error: "Count#1 needs the PI Doc assignment file." });
+          return res.status(400).json({ error: `${lane === "PRECOUNT" ? "A Pre-Count round" : "Count#1"} needs the PI Doc assignment file.` });
         }
         const byDoc = new Map();
         const seenBins = new Set();
@@ -119,7 +105,7 @@ async function handler(req, res, admin) {
         }
         if (unknown.length) {
           return res.status(400).json({
-            error: `${unknown.length} location(s) in the file are not COUNT-tagged bins of this event: ${unknown.slice(0, 15).join(", ")}${unknown.length > 15 ? "…" : ""}`,
+            error: `${unknown.length} location(s) in the file are not ${lane}-tagged bins of this event: ${unknown.slice(0, 15).join(", ")}${unknown.length > 15 ? "…" : ""}`,
           });
         }
         if (dupBins.length) {
@@ -145,20 +131,23 @@ async function handler(req, res, admin) {
           });
         }
 
-        // a PI Doc number may repeat in another event, not inside this one
-        const { data: clash, error: clashErr } = await supabase
-          .from("pi_docs")
-          .select("pi_doc_no, count_rounds(lane, round_number)")
-          .eq("stocktake_event_id", eventId)
-          .in("pi_doc_no", docs.map((d) => d.piDocNo));
-        if (clashErr) throw clashErr;
+        // a PI Doc number is unique in the whole system: not in this event, not in any other event
+        const clash = [];
+        for (let i = 0; i < docs.length; i += 200) {
+          const { data, error: clashErr } = await supabase
+            .from("pi_docs")
+            .select("pi_doc_no, count_rounds(lane, round_number, stocktake_events(name))")
+            .in("pi_doc_no", docs.slice(i, i + 200).map((d) => d.piDocNo));
+          if (clashErr) throw clashErr;
+          clash.push(...data);
+        }
         if (clash.length) {
           const list = clash
             .slice(0, 10)
-            .map((c) => `${c.pi_doc_no} (in ${roundLabel(c.count_rounds.lane, c.count_rounds.round_number)})`)
+            .map((c) => `${c.pi_doc_no} (${c.count_rounds?.stocktake_events?.name || "?"} ${roundLabel(c.count_rounds?.lane, c.count_rounds?.round_number)})`)
             .join(", ");
           return res.status(400).json({
-            error: `${clash.length} PI Doc number(s) in the file already exist in this event: ${list}${clash.length > 10 ? "…" : ""}`,
+            error: `${clash.length} PI Doc number(s) in the file already exist (a PI Doc number can be used only once in the whole system): ${list}${clash.length > 10 ? "…" : ""}`,
           });
         }
 
