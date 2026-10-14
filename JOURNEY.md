@@ -211,3 +211,6 @@ W10 add (user): the WMS-format export gets one extra column 'PI Doc' (our own PI
 ## 2026-10-13 — v2.5.1 button icons and README (NOT committed)
 - `components/BtnIcon.js`: icons on Change PI Doc (back), Switch Team (person with arrows, on /scan and /join), Refresh list, Review & Finish Bin (>), Confirm & Save (>>). Colours follow the button (CSS variable --ico-fg). Checked in headless Chrome (screenshots).
 - README: v2.5 rules (PI Doc number unique system-wide, Pre-Count from file, Pre-Count capability, report Count + Pre-Count with CSV and Excel, migration 010) and two User Journeys (Counter, Admin).
+
+## 2026-10-14 — v2.5.2 Nothing Found interlock (NOT committed)
+- Blind / unknown-bin screen: the "Nothing in this bin? Confirm it" card is hidden while a new line has a Mat, Batch or Qty, and a confirmation given earlier is withdrawn automatically, so the Bin cannot be saved as both empty and counted.

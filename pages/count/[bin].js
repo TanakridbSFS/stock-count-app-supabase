@@ -151,6 +151,12 @@ export default function CountBinPage() {
   // For a bin with no expected items in Master data — lets the counter
   // confirm "checked, nothing here" without having to fake a New Line.
   const [confirmedEmpty, setConfirmedEmpty] = useState(false);
+  // Interlock: "Nothing Found" and a new line cannot both be true. As soon as a new line has anything in it the
+  // "Nothing Found" card goes away, and an earlier confirmation is withdrawn.
+  const hasNewData = newLines.some((nl) => nl.mat || nl.batch || nl.countedQty);
+  useEffect(() => {
+    if (hasNewData && confirmedEmpty) setConfirmedEmpty(false);
+  }, [hasNewData, confirmedEmpty]);
 
   // Summary/confirm step shown before the final submit for this bin (last
   // page) — nothing is sent to the sheet until confirmed here.
@@ -873,7 +879,7 @@ export default function CountBinPage() {
           {error && <div className="banner banner-warn">{error}</div>}
           {loading && <div>Loading…</div>}
 
-          {data && (!data.knownBin || blindMode) && (
+          {data && (!data.knownBin || blindMode) && !hasNewData && (
             <div className="card">
               <div className={`banner ${blindMode ? "banner-info" : "banner-warn"}`} style={{ marginBottom: 10 }}>
                 {blindMode ? "Nothing in this bin? Confirm it here." : "This bin has no expected items in the master data."}
