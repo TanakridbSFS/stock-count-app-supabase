@@ -217,9 +217,13 @@ export default function CountBinPage() {
       // Saved NEW lines and the "nothing here" confirmation are loaded once.
       if (initialisedBin.current !== bin) {
         initialisedBin.current = bin;
+        // Recount: a saved NEW line (a Mat the Master does not have) is also a line of this screen and comes back as
+        // its answer above; it must not be loaded a second time as a new line or the two are added together on save.
+        const recountKeys = json.recount ? new Set(json.lines.map((l) => lineKeyOf(l.Mat, l.Batch, l.Status))) : null;
         setNewLines(
           json.saved
             .filter((r) => (json.canBlind && json.blindDefault ? r.lineType !== "EMPTY" : r.lineType === "NEW"))
+            .filter((r) => !(recountKeys && recountKeys.has(lineKeyOf(r.mat, r.batch, r.status))))
             .map((r) => ({
               ...emptyNewLine(),
               mat: r.mat,

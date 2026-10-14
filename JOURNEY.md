@@ -214,3 +214,6 @@ W10 add (user): the WMS-format export gets one extra column 'PI Doc' (our own PI
 
 ## 2026-10-14 — v2.5.2 Nothing Found interlock (NOT committed)
 - Blind / unknown-bin screen: the "Nothing in this bin? Confirm it" card is hidden while a new line has a Mat, Batch or Qty, and a confirmation given earlier is withdrawn automatically, so the Bin cannot be saved as both empty and counted.
+
+## 2026-10-14 — v2.5.3 Count#2 re-scan double count (NOT committed)
+- Found while recording the tutorial, reproduced on the real backend with a throw-away event (8 -> 16 -> 32 on every re-scan + save). Cause: on re-opening a recount Bin a saved NEW line (Mat not in the Master) was loaded both as a new line and as the answer of its recount line; the save merged them. Fix: in a recount the saved NEW lines that match a recount line are not loaded as new lines again (`pages/count/[bin].js`). Held back until a quiet moment because a real Pre-Count was running.

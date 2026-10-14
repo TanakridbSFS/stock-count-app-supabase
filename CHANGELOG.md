@@ -1,13 +1,14 @@
 # Changelog
 
 The number in `package.json` (`version`) is the app version. It is shown at the bottom of every page as
-`v2.5.2 · <commit> · <build time>` (Thai time), in the TV page header, and at `/api/version`.
+`v2.5.3 · <commit> · <build time>` (Thai time), in the TV page header, and at `/api/version`.
 
 Rule: every push to `main` bumps the number (patch `x.y.Z` for a fix, minor `x.Y.0` for a new feature) and
 adds a line here, so a screen on a PDA can always be matched to the code and to the commit.
 
 | Version | Commit | What changed |
 |---|---|---|
+| 2.5.3 | _this commit_ | Recount (Count#2+): re-scanning a Bin no longer doubles the quantity of a line whose Mat is not in the Master (the saved NEW line was loaded twice and added to itself on every save: 8 -> 16 -> 32). Also: every line in W001 is Block (stock type 4) - a new line counted in a W001 area now gets Block in every round |
 | 2.5.2 | 53b6e17 | Counting screen: "Confirm — Nothing Found" is hidden as soon as a new line has anything in it (and an earlier confirmation is withdrawn), so a Bin can no longer be both empty and have scanned items |
 | 2.5.1 | 57db69b | Icons on the PDA buttons: Change PI Doc (back), Switch Team (person with arrows), Refresh list, Review & Finish Bin (`>`), Confirm & Save (`>>`); README brought up to v2.5 with the User Journey (Counter, Admin) |
 | 2.5.0 | 93560c3 | PI Doc number unique in the whole system (migration 010); Pre-Count rounds are created from the same PI Doc file as Count#1 (no auto-generated Pre-Count PI Docs); Teams page: Pre-Count Storage Location per team (read from the PRECOUNT areas of the Bin Location Master), enforced in auto-assign, manual assign and on the PDA; Consolidated Report opens on Count + Pre-Count and downloads as CSV or Excel; all test counts, PI Docs and rounds wiped |
