@@ -8,6 +8,7 @@ adds a line here, so a screen on a PDA can always be matched to the code and to 
 
 | Version | Commit | What changed |
 |---|---|---|
+| 2.6.0 | _this commit_ | Pre-Count#2+: create the round by typing Bin Locations (like the SKUs of Count#2) on the Control page; each PI Doc keeps its number from the earlier Pre-Count with the round as suffix (2026100001 -> 2026100001-2); a bin never in an earlier PI Doc gets a generated number; also from a file (column 1 Bin Location, column 2 Focus SKU or All = every line of that bin; a bin with no earlier line can confirm Nothing Found): the PDA then shows only the listed Items of each bin with the earlier Pre-Count quantity to confirm or correct (round.skus = "BIN|MAT" pairs, no migration); the PI Doc file route stays |
 | 2.5.3 | c5f6d57 | Recount (Count#2+): re-scanning a Bin no longer doubles the quantity of a line whose Mat is not in the Master (the saved NEW line was loaded twice and added to itself on every save: 8 -> 16 -> 32). Also: every line in W001 is Block (stock type 4) - a new line counted in a W001 area now gets Block in every round |
 | 2.5.2 | 53b6e17 | Counting screen: "Confirm — Nothing Found" is hidden as soon as a new line has anything in it (and an earlier confirmation is withdrawn), so a Bin can no longer be both empty and have scanned items |
 | 2.5.1 | 57db69b | Icons on the PDA buttons: Change PI Doc (back), Switch Team (person with arrows), Refresh list, Review & Finish Bin (`>`), Confirm & Save (`>>`); README brought up to v2.5 with the User Journey (Counter, Admin) |

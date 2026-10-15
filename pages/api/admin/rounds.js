@@ -78,6 +78,79 @@ async function handler(req, res, admin) {
       }
       const binInfo = new Map(countBins.map((b) => [b.code, b]));
 
+      // Pre-Count#2+: a recount of the Bin Locations the admin typed in (no file); PI Docs are generated, one bin each.
+      // From a file (Bin Location + Item) the round is a recount of those Items: round.skus = "BIN|MAT" pairs and the
+      // PDA shows only the listed Items of each bin (with the earlier Pre-Count quantity) to confirm or correct.
+      const binItems = lane === "PRECOUNT" && Array.isArray(req.body.binItems)
+        ? req.body.binItems.map((r) => ({ bin: String(r.bin || "").trim(), mat: /^all$/i.test(String(r.mat || "").trim()) ? "ALL" : String(r.mat || "").trim() })).filter((r) => r.bin)
+        : [];
+      const itemPairs = Array.from(new Set(binItems.filter((r) => r.mat).map((r) => `${r.bin}|${r.mat}`)));
+      const typedBins = lane === "PRECOUNT"
+        ? Array.from(new Set([...(Array.isArray(req.body.bins) ? req.body.bins : []).map((b) => String(b).trim()), ...binItems.map((r) => r.bin)].filter(Boolean)))
+        : [];
+
+      if (typedBins.length) {
+        const unknown = typedBins.filter((b) => !binInfo.has(b));
+        if (unknown.length) {
+          return res.status(400).json({
+            error: `${unknown.length} location(s) are not PRECOUNT-tagged bins of this event: ${unknown.slice(0, 15).join(", ")}${unknown.length > 15 ? "…" : ""}`,
+          });
+        }
+        // The PI Doc of a bin keeps its number from the earlier Pre-Count round, with the round number as suffix
+        // (2026100001 -> 2026100001-2 -> 2026100001-3). Bins sharing an earlier PI Doc stay together.
+        const { data: priorRounds, error: prErr } = await supabase
+          .from("count_rounds")
+          .select("id")
+          .eq("stocktake_event_id", eventId)
+          .eq("lane", "PRECOUNT");
+        if (prErr) throw prErr;
+        const priorDocs = priorRounds.length
+          ? await fetchAll(() => supabase.from("pi_docs").select("id, pi_doc_no").in("count_round_id", priorRounds.map((r) => r.id)).order("id"))
+          : [];
+        const docNoById = new Map(priorDocs.map((d) => [d.id, d.pi_doc_no]));
+        const baseOfBin = new Map(); // bin -> base number (latest earlier PI Doc wins)
+        for (let i = 0; i < typedBins.length; i += 100) {
+          const links = await fetchAll(() =>
+            supabase.from("pi_doc_bins").select("pi_doc_id, bin_location_code").in("bin_location_code", typedBins.slice(i, i + 100)).order("id")
+          );
+          for (const l of links) {
+            const no = docNoById.get(l.pi_doc_id);
+            if (no) baseOfBin.set(l.bin_location_code, String(no).replace(/-\d+$/, ""));
+          }
+        }
+        const withBase = typedBins.filter((b) => baseOfBin.has(b));
+        const noBase = typedBins.filter((b) => !baseOfBin.has(b));
+
+        const round = await createRound({ eventId, lane, createdBy: admin.name, skus: itemPairs.length ? itemPairs : null });
+        try {
+          const byBase = new Map();
+          for (const b of withBase) {
+            if (!byBase.has(baseOfBin.get(b))) byBase.set(baseOfBin.get(b), []);
+            byBase.get(baseOfBin.get(b)).push(b);
+          }
+          const docs = [];
+          for (const [base, bins] of byBase) {
+            const first = binInfo.get(bins[0]);
+            docs.push({ piDocNo: `${base}-${round.round_number}`, area: first.area, storage: first.storage, zone: first.zone, bins });
+          }
+          const nos = docs.map((d) => d.piDocNo);
+          for (let i = 0; i < nos.length; i += 100) {
+            const { data: clash, error: cErr } = await supabase.from("pi_docs").select("pi_doc_no").in("pi_doc_no", nos.slice(i, i + 100));
+            if (cErr) throw cErr;
+            if (clash.length) {
+              throw Object.assign(new Error(`PI Doc number(s) already exist: ${clash.slice(0, 10).map((c) => c.pi_doc_no).join(", ")}`), { status: 400 });
+            }
+          }
+          let piDocCount = docs.length ? await insertPiDocs(round.id, docs) : 0;
+          // a bin that was never in an earlier Pre-Count PI Doc gets a new generated number
+          if (noBase.length) piDocCount += await autoGeneratePiDocs(round, noBase.map((b) => binInfo.get(b)));
+          return res.status(200).json({ round, piDocCount, binCount: typedBins.length, itemCount: itemPairs.length, newNumberBins: noBase });
+        } catch (e) {
+          await deleteRound(round.id);
+          throw e;
+        }
+      }
+
       if (lane === "PRECOUNT" || existing === 0) {
         // Pre-Count rounds and Count#1 — PI Docs come from the uploaded file.
         if (!Array.isArray(piDocRows) || piDocRows.length === 0) {

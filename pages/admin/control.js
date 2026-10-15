@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import AdminGate from "../../components/AdminGate";
-import { postJson, parsePiDocFile } from "../../lib/adminUpload";
+import { postJson, parsePiDocFile, parseBinItemFile } from "../../lib/adminUpload";
 
 // Empty PI Doc assignment file (Location + PI Doc No. columns) to fill in.
 async function downloadPiDocTemplate() {
@@ -25,6 +25,9 @@ function ControlPage() {
   const [piFiles, setPiFiles] = useState({ PRECOUNT: null, COUNT: null }); // the PI Doc file chosen per lane
   const [piPreviews, setPiPreviews] = useState({ PRECOUNT: "", COUNT: "" }); // what the chosen file contains
   const [skuText, setSkuText] = useState("");
+  const [binText, setBinText] = useState("");
+  const [binItemFile, setBinItemFile] = useState(null); // Pre-Count#2+ file: Bin Location + Item
+  const [binItemPreview, setBinItemPreview] = useState("");
 
   useEffect(() => {
     fetch("/api/admin/events")
@@ -103,6 +106,42 @@ function ControlPage() {
       (r) =>
         `Created a Pre-Count round: ${r.piDocCount} PI Docs, ${r.binCount} bins. Assign them to teams next.` +
         (r.uncoveredBinCount ? ` Note: ${r.uncoveredBinCount} PRECOUNT-tagged bins are not in the file.` : "")
+    );
+
+  async function chooseBinItemFile(file) {
+    setBinItemFile(file);
+    setBinItemPreview("");
+    if (!file) return;
+    try {
+      const rows = await parseBinItemFile(file);
+      const bins = new Set(rows.map((r) => r.bin));
+      const allBins = new Set(rows.filter((r) => /^all$/i.test(r.mat)).map((r) => r.bin));
+      setBinItemPreview(`${rows.length} rows: ${bins.size} bins (${allBins.size} with All), ${new Set(rows.filter((r) => r.mat && !/^all$/i.test(r.mat)).map((r) => r.bin + "|" + r.mat)).size} focus SKUs.`);
+    } catch (e) {
+      setBinItemPreview(`Cannot read the file: ${e.message}`);
+    }
+  }
+
+  const createPrecountByFile = () =>
+    act(
+      async () => {
+        if (!binItemFile) throw new Error("Choose the Bin Location + Item file first.");
+        const binItems = await parseBinItemFile(binItemFile);
+        return postJson("/api/admin/rounds", "POST", { eventId, lane: "PRECOUNT", binItems });
+      },
+      (r) =>
+        `Created ${r.round?.label || "a Pre-Count round"}: ${r.piDocCount} PI Docs, ${r.binCount} bins, ${r.itemCount} Items.` +
+        (r.newNumberBins && r.newNumberBins.length ? ` ${r.newNumberBins.length} bin(s) were never in an earlier PI Doc and got a new number.` : "") +
+        " Assign them to teams next."
+    );
+
+  const createPrecountByBins = () =>
+    act(
+      () => {
+        const bins = binText.split(/[\s,;]+/).filter(Boolean);
+        return postJson("/api/admin/rounds", "POST", { eventId, lane: "PRECOUNT", bins });
+      },
+      (r) => `Created ${r.round?.label || "a Pre-Count round"}: ${r.piDocCount} PI Docs for ${r.binCount} bins. Assign them to teams next.`
     );
 
   const createCount1 = () =>
@@ -220,6 +259,39 @@ function ControlPage() {
               onClick={l === "PRECOUNT" ? createPrecount : createCount1}
             >
               {l === "PRECOUNT" ? `Create Pre-Count${list.length + 1} from file` : "Create Count#1 from file"}
+            </button>
+          </div>
+        )}
+
+        {l === "PRECOUNT" && list.length > 0 && (
+          <div style={{ marginTop: 14 }}>
+            <div className="card-subtext">
+              Recount by Bin: enter the Bin Locations to count again (PRECOUNT-tagged bins only). Each bin keeps the PI Doc number it had in the earlier Pre-Count round, with the round number as suffix (e.g. 2026100001-2); a bin never counted before gets a new generated number.
+            </div>
+            <div className="card-subtext" style={{ marginTop: 8 }}>
+              Or from a file: <b>column 1 = Bin Location, column 2 = Focus SKU</b>, one row per SKU. The PDA then shows only
+              the listed SKUs of each bin, with the earlier Pre-Count quantity, to confirm or correct. Type <b>All</b> as the
+              Focus SKU to show every line of the Pre-Count result of that bin.
+            </div>
+            <div className="field">
+              <input type="file" accept=".xlsx,.xls,.csv" onChange={(e) => chooseBinItemFile(e.target.files?.[0] || null)} />
+              {binItemPreview && <div style={{ fontSize: 13, marginTop: 4 }}>{binItemPreview}</div>}
+            </div>
+            <button className="btn btn-primary btn-sm" disabled={busy || !eventId || !binItemFile} onClick={createPrecountByFile}>
+              Create Pre-Count{list.length + 1} from Bin + Item file
+            </button>
+            <div className="card-subtext" style={{ marginTop: 12 }}>Or just type the bins (the counter then recounts the whole bin blind):</div>
+            <div className="field">
+              <textarea
+                rows={3}
+                style={{ width: "100%", padding: 10, fontSize: 16 }}
+                placeholder="One Bin Location per line, or comma-separated"
+                value={binText}
+                onChange={(e) => setBinText(e.target.value)}
+              />
+            </div>
+            <button className="btn btn-primary btn-sm" disabled={busy || !eventId || !binText.trim()} onClick={createPrecountByBins}>
+              Create Pre-Count{list.length + 1} from Bin Locations
             </button>
           </div>
         )}

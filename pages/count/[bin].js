@@ -153,7 +153,9 @@ export default function CountBinPage() {
   const [confirmedEmpty, setConfirmedEmpty] = useState(false);
   // Interlock: "Nothing Found" and a new line cannot both be true. As soon as a new line has anything in it the
   // "Nothing Found" card goes away, and an earlier confirmation is withdrawn.
-  const hasNewData = newLines.some((nl) => nl.mat || nl.batch || nl.countedQty);
+  // a recount of a bin with no focus line (e.g. the earlier count found it empty): "Nothing Found" can be confirmed here
+  const recountNoLines = !!(data?.recount && data.lines.length === 0);
+  const hasNewData =newLines.some((nl) => nl.mat || nl.batch || nl.countedQty);
   useEffect(() => {
     if (hasNewData && confirmedEmpty) setConfirmedEmpty(false);
   }, [hasNewData, confirmedEmpty]);
@@ -516,7 +518,7 @@ export default function CountBinPage() {
 
     // Bin has no expected items and the counter confirmed there's nothing
     // here — log that as its own record instead of forcing a fake "New Line".
-    if ((data.knownBin === false || blindMode) && confirmedEmpty && (data.knownBin === false || lines.length === 0)) {
+    if ((data.knownBin === false || blindMode || recountNoLines) && confirmedEmpty && (data.knownBin === false || lines.length === 0)) {
       lines.push({
         mat: "",
         matName: "",
@@ -883,10 +885,10 @@ export default function CountBinPage() {
           {error && <div className="banner banner-warn">{error}</div>}
           {loading && <div>Loading…</div>}
 
-          {data && (!data.knownBin || blindMode) && !hasNewData && (
+          {data && (!data.knownBin || blindMode || recountNoLines) && !hasNewData && (
             <div className="card">
-              <div className={`banner ${blindMode ? "banner-info" : "banner-warn"}`} style={{ marginBottom: 10 }}>
-                {blindMode ? "Nothing in this bin? Confirm it here." : "This bin has no expected items in the master data."}
+              <div className={`banner ${blindMode || recountNoLines ? "banner-info" : "banner-warn"}`} style={{ marginBottom: 10 }}>
+                {blindMode || recountNoLines ? "Nothing in this bin? Confirm it here." : "This bin has no expected items in the master data."}
               </div>
               {!confirmedEmpty ? (
                 <button className="btn btn-correct btn-sm" onClick={() => { dirty.current = true; setConfirmedEmpty(true); }}>

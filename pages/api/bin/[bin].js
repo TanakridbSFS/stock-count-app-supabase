@@ -9,14 +9,23 @@ import { canBlindCount, blindByDefault } from "../../../lib/countMode";
 // Recount (Count#2+): the SKUs the admin picked for the round, merged from the Bin
 // Master and the earlier Count results of this bin (so a line Count#1 found that the
 // Master does not have shows up too). Each line carries the latest earlier result.
+// Pre-Count#2+ made from a file (Bin Location + Item): round.skus holds "BIN|MAT" pairs, so the focus of this bin
+// is the Items listed for it; the lines come from the earlier Pre-Count results only (Pre-Count stays blind).
 async function recountLines(round, bin, masterLines) {
   const supabase = db();
-  const focus = new Set(round.skus.map(String));
+  const binCode = String(bin).trim();
+  const focus = new Set(
+    round.lane === "PRECOUNT"
+      ? round.skus.map(String).filter((s) => s.startsWith(`${binCode}|`)).map((s) => s.slice(binCode.length + 1))
+      : round.skus.map(String)
+  );
+  // "BIN|ALL": every line of the earlier Pre-Count result of this bin is shown
+  const allOfBin = round.lane === "PRECOUNT" && focus.has("ALL");
   const { data: prior, error } = await supabase
     .from("count_rounds")
     .select("id, lane, round_number")
     .eq("stocktake_event_id", round.stocktake_event_id)
-    .eq("lane", "COUNT")
+    .eq("lane", round.lane)
     .lt("round_number", round.round_number);
   if (error) throw error;
   const roundById = Object.fromEntries(prior.map((r) => [r.id, r]));
@@ -34,7 +43,7 @@ async function recountLines(round, bin, masterLines) {
   // latest earlier result per mat|batch|status (higher round wins, then later time)
   const prev = new Map();
   for (const r of recs) {
-    if (!r.mat || !focus.has(String(r.mat))) continue;
+    if (!r.mat || !(allOfBin || focus.has(String(r.mat)))) continue;
     const k = `${r.mat}|${padBatch(r.batch)}|${normStatus(r.inventory_status)}`;
     const cur = prev.get(k);
     const rn = roundById[r.count_round_id].round_number;
@@ -89,13 +98,14 @@ export default async function handler(req, res) {
 
     // Pre-Count is a blind count: the Bin Master items are not shown, the
     // counter only adds what is physically there.
-    const blind = round.lane === "PRECOUNT";
+    // A Pre-Count#2+ made from a file (round.skus = "BIN|MAT" pairs) is a recount of those Items instead.
+    const recount = Array.isArray(round.skus) && round.skus.length > 0;
+    const blind = round.lane === "PRECOUNT" && !recount;
     // The Master lines and the saved result of this bin are independent.
     const [masterLines, saved] = await Promise.all([
-      blind ? [] : getBinLines(event.bin_master_file_id, bin),
+      blind || round.lane === "PRECOUNT" ? [] : getBinLines(event.bin_master_file_id, bin),
       getRoundBinRecords(round.id, bin),
     ]);
-    const recount = round.lane === "COUNT" && Array.isArray(round.skus) && round.skus.length > 0;
     const allLines = recount ? await recountLines(round, bin, masterLines) : masterLines;
     const knownBin = blind || recount ? true : allLines.length > 0;
     const focusSkus = recount ? [...new Set(allLines.map((l) => String(l.Mat)))] : [];
