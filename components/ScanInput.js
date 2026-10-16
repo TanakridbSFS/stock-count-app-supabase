@@ -2,7 +2,7 @@ import { forwardRef, useEffect, useImperativeHandle, useRef, useState } from "re
 
 // A field the PDA scanner (keyboard wedge) types into. It keeps the cursor but does not pop up the
 // on-screen keyboard; the small button beside it opens the keyboard for typing by hand when a scan does
-// not work. `keyboard` is the layout the button opens ("numeric" or "text"). The keyboard closes again
+// not work. `keyboard` is the layout of every keyboard this field brings up ("numeric" = number pad only, or "text"). The keyboard closes again
 // after Enter, so the next scan starts without it.
 //
 // How the keyboard is kept away (scan mode, per device):
@@ -73,7 +73,9 @@ const ScanInput = forwardRef(function ScanInput({ keyboard = "text", onKeyDown, 
         {...rest}
         ref={inner}
         {...(manual ? { virtualkeyboardpolicy: "manual" } : {})}
-        inputMode={mode === "none" && !typing ? "none" : typing ? keyboard : undefined}
+        // whenever a keyboard does come up (also in "normal" mode, or when the cursor is moved into the field by code) it is the
+        // layout of this field - numeric = the number pad only; only the "none" mode keeps it away completely
+        inputMode={mode === "none" && !typing ? "none" : keyboard}
         className={`${rest.className || ""}${invalid ? " input-invalid" : ""}`.trim()}
         onKeyDown={(e) => {
           if (e.key === "Enter" && typing) setKeyboard(false);

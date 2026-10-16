@@ -59,7 +59,7 @@ async function recountLines(round, bin, masterLines) {
       Bin: rec.bin,
       Mat: rec.mat,
       MatName: "",
-      Batch: padBatch(rec.batch),
+      Batch: String(rec.batch ?? "").trim(),
       Qty: null,
       UOM: rec.uom || "",
       ExpirationDate: "",

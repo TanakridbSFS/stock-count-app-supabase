@@ -5,6 +5,7 @@ import { resolvePiDocForTeam, assertBinInPiDoc } from "../../lib/pda";
 import { padBatch } from "../../lib/binMasterConvert";
 import { nowThailandISOString } from "../../lib/time";
 import { normStatus, defaultStatusForNewLine } from "../../lib/inventoryStatus";
+import { matError, batchError, qtyError } from "../../lib/validate";
 
 // POST /api/count
 // body: { piDocId, counterName (= team name), bin, deviceId, lines: [{ mat, batch, status, uom, expectedQty, countedQty, lineType }],
@@ -30,6 +31,22 @@ export default async function handler(req, res) {
     if (!validTypes.has(line.lineType)) {
       return res.status(400).json({ error: `Invalid lineType: ${line.lineType}` });
     }
+  }
+
+  // Same checks as the PDA screen, repeated here so a wrong value can never reach the database by another way
+  // (an old page still open on a device, a script): Mat 8 digits, Batch digits only and at most 10, quantity a number >= 0.
+  for (const line of lines) {
+    if (line.lineType === "EMPTY") continue;
+    const where = `Mat ${line.mat || "—"}`;
+    if (!String(line.mat || "").trim()) return res.status(400).json({ error: "Mat ห้ามว่าง" });
+    const m = matError(String(line.mat));
+    if (m) return res.status(400).json({ error: `${m} (${where})` });
+    if (line.lineType === "NEW" && !String(line.batch || "").trim()) return res.status(400).json({ error: `Batch ห้ามว่าง (${where})` });
+    const b = batchError(String(line.batch ?? ""));
+    if (b) return res.status(400).json({ error: `${b} (${where}, Batch ${line.batch})` });
+    const q = qtyError(line.countedQty);
+    if (q) return res.status(400).json({ error: `${q} (${where})` });
+    if (String(line.countedQty ?? "").trim() === "") return res.status(400).json({ error: `กรุณากรอกจำนวน (${where})` });
   }
 
   try {
@@ -80,7 +97,7 @@ export default async function handler(req, res) {
       // Always a 10-digit text code — pad it here too, since a manually
       // typed "+ Add New Line" batch (e.g. "9") should end up looking the
       // same as one that came from BinMaster ("0000000009").
-      Batch: padBatch(line.batch),
+      Batch: String(line.batch ?? "").trim(), // as scanned / typed; comparisons use padBatch
       UOM: line.uom || "",
       ExpectedQty: line.expectedQty ?? "",
       CountedQty: line.countedQty ?? "",

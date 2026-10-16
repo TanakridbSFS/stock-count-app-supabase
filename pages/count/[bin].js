@@ -28,7 +28,7 @@ function parseComboScan(raw) {
   if (parts.length !== 3) return null;
   const [sku, batch, qty] = parts.map((p) => p.trim());
   if (!sku || !batch) return null;
-  return { mat: sku, batch: padBatch(batch), qty: /^\d+(\.\d+)?$/.test(qty) ? qty : "" };
+  return { mat: sku, batch, qty: /^\d+(\.\d+)?$/.test(qty) ? qty : "" };
 }
 
 // Mat and Batch are digits only (the PDA shows the numeric keypad for them).
@@ -100,8 +100,8 @@ function clearDraft(piDocId, bin) {
   } catch {}
 }
 
-// What is wrong with a new line, "" if nothing: Mat and Batch must be filled, Mat 8 digits, Batch up to
-// 10 digits (a shorter Batch is padded with zeros), the counted quantity a number that is not negative.
+// What is wrong with a new line, "" if nothing: Mat and Batch must be filled, Mat 8 digits, Batch exactly
+// 10 digits (nothing is padded), the counted quantity a number that is not negative.
 function newLineError(nl) {
   if (!String(nl.mat || "").trim()) return "Mat ห้ามว่าง";
   const m = matError(nl.mat);
@@ -430,7 +430,7 @@ export default function CountBinPage() {
       if (/หน่วย/.test(bad)) document.getElementById(`newline-${nl._key}-uom`)?.focus({ preventScroll: true });
       return;
     }
-    closeLine(idx, { batch: padBatch(nl.batch), uom: lineUom(nl) });
+    closeLine(idx, { batch: String(nl.batch).trim(), uom: lineUom(nl) });
   }
 
   // Builds + validates the list of lines that would be saved right now.
@@ -498,7 +498,7 @@ export default function CountBinPage() {
         return null;
       }
       // One result per Mat + Batch in a bin: a second line with the same Mat + Batch is added to the first.
-      const same = lines.find((x) => x.lineType === "NEW" && x.mat === nl.mat && x.batch === padBatch(nl.batch));
+      const same = lines.find((x) => x.lineType === "NEW" && x.mat === nl.mat && padBatch(x.batch) === padBatch(nl.batch));
       if (same) {
         same.countedQty += Number(nl.countedQty);
         same.merged = (same.merged || 1) + 1;
@@ -507,7 +507,7 @@ export default function CountBinPage() {
       lines.push({
         mat: nl.mat,
         matName: nameOf(nl.mat) || "",
-        batch: padBatch(nl.batch),
+        batch: String(nl.batch).trim(), // the value as scanned / typed - no zeros added
         status: nl.status || data.newLineStatus, // the server sets it again (Count: UR, Pre-Count: by area)
         uom: lineUom(nl),
         expectedQty: "",
@@ -676,14 +676,11 @@ export default function CountBinPage() {
               }
               updateNewLine(idx, { batch, warnBatch: "" });
             }}
-            // Batch is always stored as 10 digits (0000000001).
-            onBlur={() => nl.batch && !nl.batch.includes("|") && updateNewLine(idx, { batch: padBatch(nl.batch) })}
             onKeyDown={(e) => {
               // Go straight to Counted Qty (or to the unit when the Mat is not in the list).
               if (e.key === "Enter") {
                 e.preventDefault();
                 if (nl.batch.includes("|") && applyComboNow(idx, nl, nl.batch)) return;
-                updateNewLine(idx, { batch: padBatch(nl.batch) });
                 document.getElementById(`newline-${nl._key}-${needUom && !nl.uomPick ? "uom" : "qty"}`)?.focus();
               }
             }}
@@ -723,7 +720,7 @@ export default function CountBinPage() {
             type="number"
             min="0"
             step="any"
-            keyboard="numeric"
+            keyboard="decimal"
             value={nl.countedQty}
             invalid={!!qtyError(nl.countedQty)}
             onChange={(e) => updateNewLine(idx, { countedQty: e.target.value })}
@@ -1025,7 +1022,7 @@ export default function CountBinPage() {
                         type="number"
                         min="0"
                         step="any"
-                        keyboard="numeric"
+                        keyboard="decimal"
                         autoFocus
                         value={e.countedQty}
                         invalid={!!qtyError(e.countedQty)}
@@ -1075,7 +1072,7 @@ export default function CountBinPage() {
               <div className="card" key={nl._key}>
                 <span className="badge badge-new">NEW</span> <StatusBadge status={nl.status || data?.newLineStatus} />
                 <div className="card-row"><span>Mat</span><b>{nl.mat}{nameOf(nl.mat) ? ` — ${nameOf(nl.mat)}` : ""}</b></div>
-                <div className="card-row"><span>Batch</span><b>{padBatch(nl.batch) || "—"}</b></div>
+                <div className="card-row"><span>Batch</span><b>{nl.batch || "—"}</b></div>
                 <div className="card-row"><span>Counted</span><b>{nl.countedQty} <UomText uom={lineUom(nl)} /></b></div>
                 <div style={{ marginTop: 10 }}>
                   <button className="btn btn-secondary btn-sm" onClick={() => updateNewLine(idx, { editing: true })}>
