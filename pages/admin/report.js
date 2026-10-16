@@ -233,6 +233,7 @@ function ReportPage() {
               <tr>
                 <th>Bin</th>
                 <th>Mat</th>
+                <th>Description</th>
                 <th>Batch</th>
                 <th>Inv. Status</th>
                 <th>UOM</th>
@@ -250,6 +251,7 @@ function ReportPage() {
                 <tr key={i}>
                   <td>{r.Bin}</td>
                   <td>{r.Mat}</td>
+                  <td>{r.Description}</td>
                   <td>{r.Batch}</td>
                   <td>{r["Inventory Status"]}</td>
                   <td>{r.UOM}</td>

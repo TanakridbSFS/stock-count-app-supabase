@@ -1,9 +1,11 @@
 import { resolvePiDocForTeam } from "../../lib/pda";
 import { db } from "../../lib/stocktake";
+import SAP_NAMES from "../../lib/materialNames.json";
 
 // GET /api/mat-names?piDocId=...&teamName=...&mats=10301167,10300055
 // The name of each Mat as written in the Master (bin_master_raw.sku_name) of the PI Doc's event, for the
-// counting screen (scanned lines, summary). A Mat that is not in the Master at all gets "".
+// counting screen (scanned lines, summary); a Mat the stock export does not have gets its name from the SAP material
+// master (lib/materialNames.json), and "" only if SAP does not know it either.
 // Same access rule as the bin screen: the team must own the PI Doc and its round must be ACTIVE.
 export default async function handler(req, res) {
   if (req.method !== "GET") return res.status(405).json({ error: "Method not allowed" });
@@ -23,7 +25,7 @@ export default async function handler(req, res) {
           .not("sku_name", "is", null)
           .limit(1);
         if (error) throw error;
-        names[m] = data?.[0]?.sku_name || "";
+        names[m] = data?.[0]?.sku_name || SAP_NAMES[m] || ""; // the stock export first, else the SAP material master
       })
     );
     res.setHeader("Cache-Control", "no-store");
