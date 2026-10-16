@@ -146,6 +146,9 @@ export default function CountBinPage() {
   const comboTimer = useRef(null); // a combo barcode typed one character at a time is applied when it stops
   const [saving, setSaving] = useState(false);
   const initialisedBin = useRef(null);
+  // Leaving the bin with unsaved work (Cancel / Back to Scan, or the Back button of the device) asks first.
+  const [showLeave, setShowLeave] = useState(false);
+  const leaving = useRef(false);
   const [focusTab, setFocusTab] = useState("ALL"); // recount: which focus SKU is on screen
 
   // For a bin with no expected items in Master data — lets the counter
@@ -285,6 +288,36 @@ export default function CountBinPage() {
       .catch(() => mats.forEach((m) => askedMats.current.delete(m)));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [newLines, data]);
+
+  function leaveToScan() {
+    if (dirty.current && !leaving.current) return setShowLeave(true);
+    router.push("/scan");
+  }
+
+  function confirmLeave() {
+    leaving.current = true;
+    // the notice only stands between the tap and leaving: the draft on this device stays as before (24 h, comes back
+    // when the bin is opened again) - written now so the very last change is in it too
+    try {
+      localStorage.setItem(draftKey(session.piDocId, bin), JSON.stringify({ savedAt: Date.now(), edits, newLines, confirmedEmpty, blindChoice }));
+    } catch {}
+    setShowLeave(false);
+    router.push("/scan");
+  }
+
+  // the Back button of the browser / device: stay on the page and ask
+  useEffect(() => {
+    router.beforePopState(() => {
+      if (dirty.current && !leaving.current) {
+        window.history.pushState(null, "", router.asPath);
+        setShowLeave(true);
+        return false;
+      }
+      return true;
+    });
+    return () => router.beforePopState(() => true);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [router]);
 
   function discardDraft() {
     clearDraft(session.piDocId, bin);
@@ -1101,11 +1134,28 @@ export default function CountBinPage() {
                 <NextIcon />
               </button>
             )}
-            <button className="btn btn-secondary" onClick={() => router.push("/scan")}>
+            <button className="btn btn-secondary" onClick={leaveToScan}>
               Cancel / Back to Scan
             </button>
           </div>
         </>
+      )}
+
+      {showLeave && (
+        <div className="notice-backdrop" role="dialog" aria-modal="true">
+          <div className="notice-box">
+            <div className="notice-title">Some data will be lost</div>
+            <div className="notice-text">What you entered in this bin has not been saved. Leave anyway?</div>
+            <div className="notice-actions">
+              <button className="btn btn-danger" onClick={confirmLeave}>
+                Confirm
+              </button>
+              <button className="btn btn-secondary" onClick={() => setShowLeave(false)}>
+                Cancel
+              </button>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   );
