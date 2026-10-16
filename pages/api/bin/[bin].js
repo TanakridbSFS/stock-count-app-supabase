@@ -124,6 +124,7 @@ export default async function handler(req, res) {
       blind,
       recount,
       focusSkus,
+      lane: round.lane,
       roundLabel: roundLabel(round.lane, round.round_number),
       // the Warehouse Area of the PI Doc and the Inventory Status a new line gets there (Count: UR; Pre-Count:
       // Block in a Blocked area, UR otherwise) — shown on the PDA, set again by the server on save

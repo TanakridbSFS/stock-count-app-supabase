@@ -400,12 +400,13 @@ export default function CountBinPage() {
     focusNewLine(line);
   }
 
-  // A finished line closes. When it was the last one, a fresh empty line opens under it with the cursor on Mat
-  // so the next barcode can be scanned right away (an empty line left at the end is ignored on save).
+  // A finished line closes. In Pre-Count and in a Blind Count, when it was the last one, a fresh empty line opens under
+  // it with the cursor on Mat so the next barcode can be scanned right away (an empty line left at the end is ignored
+  // on save). In a Checklist (Count#1 checklist, Count#2+) no line is opened by itself: the counter taps "+ Add New Line".
   function closeLine(idx, patch) {
     dirty.current = true;
     setError("");
-    if (idx !== newLines.length - 1) {
+    if (idx !== newLines.length - 1 || !(data?.lane === "PRECOUNT" || blindMode)) {
       updateNewLine(idx, { ...patch, editing: false });
       focusAddButton();
       return;
