@@ -58,14 +58,15 @@ export default async function handler(req, res) {
 
     // Blind Count (Count#1): the counter scanned what is in the bin without seeing the Master. A scanned line that
     // is a UR line of the Master (same Mat + Batch) is compared with it here: expected quantity kept, MATCH /
-    // ADJUSTED / ZERO; anything else stays NEW. Nothing is added for Master lines that were not scanned.
+    // ADJUSTED / ZERO; anything else stays NEW. A UR line of the Master that was not scanned at all is saved as ZERO
+    // (counted 0): in a Blind Count what is not found is not there.
     let toSave = lines;
     if (blind === true && canBlindCount(round)) {
       const masterUr = new Map();
       for (const m of await getBinLines(event.bin_master_file_id, String(bin).trim())) {
         if (normStatus(m.Status) !== "UR") continue;
         const k = `${m.Mat}|${padBatch(m.Batch)}`;
-        const cur = masterUr.get(k) || { qty: 0, uom: m.UOM };
+        const cur = masterUr.get(k) || { qty: 0, uom: m.UOM, mat: m.Mat, batch: m.Batch };
         cur.qty += Number(m.Qty) || 0;
         masterUr.set(k, cur);
       }
@@ -82,6 +83,11 @@ export default async function handler(req, res) {
           lineType: counted === 0 ? "ZERO" : counted === m.qty ? "MATCH" : "ADJUSTED",
         };
       });
+      const scanned = new Set(toSave.filter((l) => l.mat).map((l) => `${l.mat}|${padBatch(l.batch)}`));
+      for (const [k, m] of masterUr) {
+        if (scanned.has(k)) continue;
+        toSave.push({ mat: m.mat, batch: m.batch, status: "UR", uom: m.uom || "", expectedQty: m.qty, countedQty: 0, lineType: "ZERO" });
+      }
     }
 
     const timestamp = nowThailandISOString();

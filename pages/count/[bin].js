@@ -476,12 +476,13 @@ export default function CountBinPage() {
       const k = lineKey(l);
       const e = edits[k] || { status: "unanswered", countedQty: "" };
       if (e.status === "unanswered") {
-        if (data.recount) {
-          // a recount is finished only when every focus line is answered
-          setError(`Please answer ${l.Mat} (${l.Batch}) — Correct or Wrong, or enter the quantity.`);
-          return null;
-        }
-        continue; // not answered yet — leave for later
+        // Checklist (Count#1 checklist, Count#2+) and a recount: every line on the screen must be answered before the
+        // page can be saved. (A Blind Count has no lines to answer and never gets here.)
+        const open = data.lines.filter((x) => (edits[lineKey(x)]?.status || "unanswered") === "unanswered").length;
+        setError(
+          `${open} line${open > 1 ? "s are" : " is"} not answered yet. Please answer ${l.Mat} (${l.Batch}) — Correct or Wrong, or enter the quantity.`
+        );
+        return null;
       }
       if (e.status === "wrong") {
         // Still open (not closed with "Confirm" yet) — not ready to save.
