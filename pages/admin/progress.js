@@ -53,7 +53,9 @@ function ProgressPage() {
 
   useEffect(() => {
     load();
-    const t = setInterval(load, 60000); // refresh every minute while left open
+    const t = setInterval(() => {
+      if (!document.hidden) load(); // refresh every minute while left open, not while the tab is hidden
+    }, 60000);
     return () => clearInterval(t);
   }, [roundId]);
 

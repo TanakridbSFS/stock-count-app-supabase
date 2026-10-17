@@ -8,8 +8,8 @@ import { versionText } from "../../components/VersionTag";
 // per bin (Top 5 fastest, Top 10 slowest). Tabs filter the whole page by Storage Location; inside a
 // Storage Location tab Reserve and Picking get a frame each. Teams are Working (has a PI Doc to finish),
 // Idle (switched on, nothing to count) or Inactive (switched off, nothing to count). Auto mode steps
-// through the tabs every N seconds. Light / Dark theme. Refreshes every 30 seconds.
-const REFRESH_MS = 30000;
+// through the tabs every N seconds. Light / Dark theme. Refreshes every 60 seconds (not while the tab is hidden).
+const REFRESH_MS = 60000;
 const KIND_ORDER = ["RESERVE", "PICKING", "OTHER"];
 const KIND_NAME = { RESERVE: "Reserve", PICKING: "Picking", OTHER: "Other" };
 const mmss = (sec) => `${Math.floor(sec / 60)}:${String(Math.round(sec % 60)).padStart(2, "0")}`;
@@ -121,8 +121,17 @@ function TvPage() {
   }
   useEffect(() => {
     load();
-    const t = setInterval(load, REFRESH_MS);
-    return () => clearInterval(t);
+    const t = setInterval(() => {
+      if (!document.hidden) load();
+    }, REFRESH_MS);
+    const onShow = () => {
+      if (!document.hidden) load();
+    };
+    document.addEventListener("visibilitychange", onShow);
+    return () => {
+      clearInterval(t);
+      document.removeEventListener("visibilitychange", onShow);
+    };
   }, []);
   useEffect(() => {
     const t = setInterval(() => setNow(Date.now()), 1000);
